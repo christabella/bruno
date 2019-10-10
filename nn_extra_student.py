@@ -1,10 +1,13 @@
+"""Student-t Process (TP) layer"""
+
 import collections
 
 import numpy as np
 import tensorflow as tf
 
 Student = collections.namedtuple('Student', ['mu', 'var', 'nu'])
-State = collections.namedtuple('State', ['num_observations', 'beta', 'x_sum', 'k'])
+State = collections.namedtuple('State',
+                               ['num_observations', 'beta', 'x_sum', 'k'])
 
 
 def inv_softplus(x):
@@ -16,7 +19,8 @@ def inv_sigmoid(x):
 
 
 class StudentRecurrentLayer(object):
-    def __init__(self, shape,
+    def __init__(self,
+                 shape,
                  nu_init=1000,
                  mu_init=0.,
                  var_init=1.,
@@ -27,22 +31,16 @@ class StudentRecurrentLayer(object):
 
         self._shape = shape
 
-        self.mu = tf.ones((1,) + shape, name='prior_mean') * mu_init
+        self.mu = tf.ones((1, ) + shape, name='prior_mean') * mu_init
 
         self.var_vbl = tf.get_variable(
-            "prior_var",
-            (1,) + shape,
-            tf.float32,
-            tf.constant_initializer(inv_softplus(np.sqrt(var_init)))
-        )
+            "prior_var", (1, ) + shape, tf.float32,
+            tf.constant_initializer(inv_softplus(np.sqrt(var_init))))
         self.var = tf.square(tf.nn.softplus(self.var_vbl))
 
         self.nu_vbl = tf.get_variable(
-            "prior_nu",
-            (1,) + shape,
-            tf.float32,
-            tf.constant_initializer(np.log(nu_init - min_nu))
-        )
+            "prior_nu", (1, ) + shape, tf.float32,
+            tf.constant_initializer(np.log(nu_init - min_nu)))
         self.nu = tf.exp(self.nu_vbl) + min_nu
 
         self.prior = Student(
@@ -52,11 +50,8 @@ class StudentRecurrentLayer(object):
         )
 
         self.corr_vbl = tf.get_variable(
-            "prior_corr",
-            (1,) + shape,
-            tf.float32,
-            tf.constant_initializer(inv_sigmoid(corr_init))
-        )
+            "prior_corr", (1, ) + shape, tf.float32,
+            tf.constant_initializer(inv_sigmoid(corr_init)))
         self.corr = tf.sigmoid(self.corr_vbl)
         self.cov = tf.sigmoid(self.corr_vbl) * self.var
 
@@ -93,11 +88,16 @@ class StudentRecurrentLayer(object):
         nu_out = nu + 1
         mu_out = (1. - dd) * mu + observation * dd
 
-        a_i = (self.cov * (i - 2.) + self.var) / ((self.var - self.cov) * (self.cov * (i - 1.) + self.var))
-        b_i = -1. * self.cov / ((self.var - self.cov) * (self.cov * (i - 1.) + self.var))
-        b_i_prev = -1. * self.cov / ((self.var - self.cov) * (self.cov * (i - 2.) + self.var))
+        a_i = (self.cov * (i - 2.) + self.var) / ((self.var - self.cov) *
+                                                  (self.cov *
+                                                   (i - 1.) + self.var))
+        b_i = -1. * self.cov / ((self.var - self.cov) * (self.cov *
+                                                         (i - 1.) + self.var))
+        b_i_prev = -1. * self.cov / ((self.var - self.cov) *
+                                     (self.cov * (i - 2.) + self.var))
 
-        beta_out = beta + (a_i - b_i) * tf.square(x_zm) + b_i * tf.square(x_sum + x_zm) - b_i_prev * tf.square(x_sum)
+        beta_out = beta + (a_i - b_i) * tf.square(x_zm) + b_i * tf.square(
+            x_sum + x_zm) - b_i_prev * tf.square(x_sum)
         k_out = (1. - dd) * k + (self.var - self.cov) * dd
 
         sigma_out = (self.nu + beta_out - 2.) / (nu_out - 2.) * k_out
@@ -109,7 +109,8 @@ class StudentRecurrentLayer(object):
         x = observation
         mu, var, nu = self.current_distribution
         ln_gamma_quotient = tf.lgamma((1. + nu) / 2.) - tf.lgamma(nu / 2.)
-        ln_nom = (-(1. + nu) / 2.) * tf.log1p(tf.square(x - mu) / ((nu - 2.) * var))
+        ln_nom = (-(1. + nu) / 2.) * tf.log1p(
+            tf.square(x - mu) / ((nu - 2.) * var))
         ln_denom = 0.5 * tf.log((nu - 2.) * np.pi * var)
         log_pdf = ln_gamma_quotient + ln_nom - ln_denom
         if mask_dim is not None:
@@ -121,7 +122,8 @@ class StudentRecurrentLayer(object):
         x = observation
         mu, var, nu = self.prior
         ln_gamma_quotient = tf.lgamma((1. + nu) / 2.) - tf.lgamma(nu / 2.)
-        ln_nom = (-(1. + nu) / 2.) * tf.log1p((tf.square(x - mu) / ((nu - 2.) * var)))
+        ln_nom = (-(1. + nu) / 2.) * tf.log1p(
+            (tf.square(x - mu) / ((nu - 2.) * var)))
         ln_denom = 0.5 * tf.log((nu - 2.) * np.pi * var)
         log_pdf = ln_gamma_quotient + ln_nom - ln_denom
         if mask_dim is not None:
@@ -132,11 +134,10 @@ class StudentRecurrentLayer(object):
     def sample(self, nr_samples=1):
         mu, var, nu = self.current_distribution
 
-        rvs = tf.random_uniform(
-            shape=tf.TensorShape([2, nr_samples]).concatenate(mu.shape),
-            seed=self.seed_rng.randint(317070),
-            name="Student_sampler"
-        )
+        rvs = tf.random_uniform(shape=tf.TensorShape([2, nr_samples
+                                                      ]).concatenate(mu.shape),
+                                seed=self.seed_rng.randint(317070),
+                                name="Student_sampler")
         a = tf.reduce_min(rvs, axis=0)
         b = tf.reduce_max(rvs, axis=0)
 

@@ -6,7 +6,12 @@ import utils_conditional
 
 
 class ShapenetConditionalNPDataIterator():
+    """
+    seq_len: how many different poses (y) to sample
+    batch_size: [usually 4] 
+    """
     def __init__(self, seq_len, batch_size, set='train', rng=None):
+        # x and y are... image samples and
         self.x, self.y, self.info = utils_conditional.load_shapenet(set)
 
         self.n_samples = len(self.x)
@@ -43,19 +48,26 @@ class ShapenetConditionalNPDataIterator():
         return (self.seq_len, self.info.shape[-1])
 
     def get_observation_size(self):
-        return (self.seq_len,) + self.img_shape
+        return (self.seq_len, ) + self.img_shape
 
     def generate(self, rng=None, noise_rng=None):
         rng = self.rng if rng is None else rng
         noise_rng = self.rng if noise_rng is None else noise_rng
 
         while True:
-            x_batch = np.zeros((self.batch_size, self.seq_len,) + self.img_shape, dtype='float32')
-            y_batch = np.zeros((self.batch_size,) + self.get_label_size(), dtype='float32')
+            x_batch = np.zeros((
+                self.batch_size,
+                self.seq_len,
+            ) + self.img_shape,
+                               dtype='float32')
+            y_batch = np.zeros((self.batch_size, ) + self.get_label_size(),
+                               dtype='float32')
 
             for i in range(self.batch_size):
                 c = rng.choice(self.classes)
-                img_idxs = rng.choice(self.y2idxs[c], size=self.seq_len, replace=False)
+                img_idxs = rng.choice(self.y2idxs[c],
+                                      size=self.seq_len,
+                                      replace=True)
 
                 for j in range(self.seq_len):
                     x_batch[i, j] = self.x[img_idxs[j]]
@@ -64,17 +76,27 @@ class ShapenetConditionalNPDataIterator():
             x_batch += noise_rng.uniform(size=x_batch.shape)
             yield x_batch, y_batch
 
-    def generate_each_digit(self, rng=None, noise_rng=None, random_classes=False):
+    def generate_each_digit(self,
+                            rng=None,
+                            noise_rng=None,
+                            random_classes=True):
         rng = self.rng if rng is None else rng
         noise_rng = self.rng if noise_rng is None else noise_rng
         if random_classes:
             rng.shuffle(self.classes)
         for c in self.classes:
-            x_batch = np.zeros((self.batch_size, self.seq_len,) + self.img_shape, dtype='float32')
-            y_batch = np.zeros((self.batch_size,) + self.get_label_size(), dtype='float32')
+            x_batch = np.zeros((
+                self.batch_size,
+                self.seq_len,
+            ) + self.img_shape,
+                               dtype='float32')
+            y_batch = np.zeros((self.batch_size, ) + self.get_label_size(),
+                               dtype='float32')
 
             for i in range(self.batch_size):
-                img_idxs = rng.choice(self.y2idxs[c], size=self.seq_len, replace=False)
+                img_idxs = rng.choice(self.y2idxs[c],
+                                      size=self.seq_len,
+                                      replace=False)
 
                 for j in range(self.seq_len):
                     x_batch[i, j] = self.x[img_idxs[j]]

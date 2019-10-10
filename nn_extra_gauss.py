@@ -1,3 +1,5 @@
+"""Gaussian Process layer"""
+
 import collections
 
 import numpy as np
@@ -16,37 +18,25 @@ def inv_sigmoid(x):
 
 
 class GaussianRecurrentLayer(object):
-    def __init__(self, shape,
-                 mu_init=0.,
-                 var_init=1.,
-                 corr_init=0.1):
+    def __init__(self, shape, mu_init=0., var_init=1., corr_init=0.1):
 
         self.seed_rng = np.random.RandomState(42)
 
         self._shape = shape
 
         with tf.variable_scope("gaussian"):
-            self.mu = tf.ones((1,) + shape, name='prior_mean') * mu_init
+            self.mu = tf.ones((1, ) + shape, name='prior_mean') * mu_init
 
             self.var_vbl = tf.get_variable(
-                "prior_var",
-                (1,) + shape,
-                tf.float32,
-                tf.constant_initializer(inv_softplus(np.sqrt(var_init)))
-            )
+                "prior_var", (1, ) + shape, tf.float32,
+                tf.constant_initializer(inv_softplus(np.sqrt(var_init))))
             self.var = tf.square(tf.nn.softplus(self.var_vbl))
 
-            self.prior = Gaussian(
-                self.mu,
-                self.var
-            )
+            self.prior = Gaussian(self.mu, self.var)
 
             self.corr_vbl = tf.get_variable(
-                "prior_corr",
-                (1,) + shape,
-                tf.float32,
-                tf.constant_initializer(inv_sigmoid(corr_init))
-            )
+                "prior_corr", (1, ) + shape, tf.float32,
+                tf.constant_initializer(inv_sigmoid(corr_init)))
             self.corr = tf.sigmoid(self.corr_vbl)
             self.cov = tf.sigmoid(self.corr_vbl) * self.var
 
@@ -89,7 +79,8 @@ class GaussianRecurrentLayer(object):
     def get_log_likelihood(self, observation, mask_dim=None):
         x = observation
         mu, var = self.current_distribution
-        log_pdf = -0.5 * tf.log(2. * np.pi * var) - tf.square(x - mu) / (2. * var)
+        log_pdf = -0.5 * tf.log(
+            2. * np.pi * var) - tf.square(x - mu) / (2. * var)
         if mask_dim is not None:
             return tf.reduce_sum(log_pdf * mask_dim, 1)
         else:
@@ -98,7 +89,8 @@ class GaussianRecurrentLayer(object):
     def get_log_likelihood_under_prior(self, observation, mask_dim=None):
         x = observation
         mu, var = self.prior
-        log_pdf = -0.5 * tf.log(2. * np.pi * var) - tf.square(x - mu) / (2. * var)
+        log_pdf = -0.5 * tf.log(
+            2. * np.pi * var) - tf.square(x - mu) / (2. * var)
         if mask_dim is not None:
             return tf.reduce_sum(log_pdf * mask_dim, 1)
         else:
@@ -107,10 +99,9 @@ class GaussianRecurrentLayer(object):
     def sample(self, nr_samples=1):
         mu, var = self.current_distribution
 
-        return tf.random_normal(
-            shape=tf.TensorShape([nr_samples]).concatenate(mu.shape),
-            mean=mu,
-            stddev=tf.sqrt(var),
-            seed=self.seed_rng.randint(317070),
-            name="Normal_sampler"
-        )
+        return tf.random_normal(shape=tf.TensorShape([nr_samples
+                                                      ]).concatenate(mu.shape),
+                                mean=mu,
+                                stddev=tf.sqrt(var),
+                                seed=self.seed_rng.randint(317070),
+                                name="Normal_sampler")

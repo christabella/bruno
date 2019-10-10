@@ -20,16 +20,29 @@ my_dpi = 1000
 
 # -----------------------------------------------------------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument('--config_name', type=str, required=True, help='Configuration name')
-parser.add_argument('--set', type=str, default='test', help='Test or train part')
-parser.add_argument('--n_samples', type=int, default=3, help='Number of sequences')
+parser.add_argument('--config_name',
+                    type=str,
+                    required=True,
+                    help='Configuration name')
+parser.add_argument('--set',
+                    type=str,
+                    default='test',
+                    help='Test or train part')
+parser.add_argument('--n_samples',
+                    type=int,
+                    default=3,
+                    help='Number of sequences')
 parser.add_argument('--seq_len', type=int, default=20, help='Sequence length')
 parser.add_argument('--n_context', type=int, default=1, help='Context length')
-parser.add_argument('--random_classes', type=int, default=1, help='Random class order')
+parser.add_argument('--random_classes',
+                    type=int,
+                    default=1,
+                    help='Random class order')
 parser.add_argument('--sort', type=int, default=0, help='Sort by angle')
 args, _ = parser.parse_known_args()
 defaults.set_parameters(args)
-print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))  # pretty print args
+print('input args:\n', json.dumps(vars(args), indent=4,
+                                  separators=(',', ':')))  # pretty print args
 # -----------------------------------------------------------------------------
 rng = np.random.RandomState(42)
 tf.set_random_seed(42)
@@ -53,8 +66,8 @@ print('seq_len', config.seq_len)
 model = tf.make_template('model', config.build_model, sampling_mode=True)
 all_params = tf.trainable_variables()
 
-x_in = tf.placeholder(tf.float32, shape=(1,) + config.obs_shape)
-y_label = tf.placeholder(tf.float32, shape=(1,) + config.label_shape)
+x_in = tf.placeholder(tf.float32, shape=(1, ) + config.obs_shape)
+y_label = tf.placeholder(tf.float32, shape=(1, ) + config.label_shape)
 samples = model(x_in, y_label)
 
 saver = tf.train.Saver()
@@ -89,7 +102,9 @@ with tf.Session() as sess:
         if args.sort:
             angles = []
             for j in range(config.seq_len):
-                angle = int(round(data_iter.deprocess_angle(y_batch[0, j, :2])))
+                # Generate seq_len number of angles
+                angle = int(round(data_iter.deprocess_angle(
+                    y_batch[0, j, :2])))
                 if j < config.n_context:
                     angle = -1
                 angles.append(angle)
@@ -108,7 +123,8 @@ with tf.Session() as sess:
             x_plt /= 256.
 
         x_context = x_plt[:, :config.n_context * img_dim]
-        x_plt_framed = np.zeros((x_context.shape[0] + 2 * fs, x_context.shape[1] + 2 * fs, 3))
+        x_plt_framed = np.zeros(
+            (x_context.shape[0] + 2 * fs, x_context.shape[1] + 2 * fs, 3))
         x_plt_framed[fs:-fs, fs:-fs, :] += x_context
         x_plt_framed[:fs, :, 0] = 1
         x_plt_framed[-fs:, :, 0] = 1
@@ -118,9 +134,11 @@ with tf.Session() as sess:
 
         x_plt = x_plt[:, config.n_context * img_dim:]
 
-        sample_plt = sampled_xx.reshape((args.n_samples, (config.seq_len), img_dim, img_dim, n_channels))
+        sample_plt = sampled_xx.reshape(
+            (args.n_samples, (config.seq_len), img_dim, img_dim, n_channels))
         sample_plt = sample_plt.swapaxes(1, 2)
-        sample_plt = sample_plt.reshape((args.n_samples * img_dim, config.seq_len * img_dim, n_channels))
+        sample_plt = sample_plt.reshape(
+            (args.n_samples * img_dim, config.seq_len * img_dim, n_channels))
         sample_plt = sample_plt[:, config.n_context * img_dim:]
         if np.max(sample_plt) >= 255.:
             sample_plt /= 256.
@@ -129,9 +147,15 @@ with tf.Session() as sess:
                             (img_dim + args.n_samples * img_dim) / my_dpi * 5),
                    dpi=my_dpi,
                    frameon=False)
-        gs = gridspec.GridSpec(nrows=2, ncols=2, wspace=0.025, hspace=0.025, height_ratios=[1, args.n_samples],
-                               width_ratios=[config.n_context, config.seq_len - config.n_context])
+        gs = gridspec.GridSpec(
+            nrows=2,
+            ncols=2,
+            wspace=0.025,
+            hspace=0.025,
+            height_ratios=[1, args.n_samples],
+            width_ratios=[config.n_context, config.seq_len - config.n_context])
 
+        # Top-left: Context image
         ax0 = plt.subplot(gs[0])
         img = x_context
         plt.imshow(img, interpolation='None')
@@ -139,6 +163,7 @@ with tf.Session() as sess:
         plt.yticks([])
         plt.axis('off')
 
+        # Top right: Ground truth
         ax1 = plt.subplot(gs[1])
         img = x_plt
         plt.imshow(img[:, :, 0], cmap='gray', interpolation='None')
@@ -146,6 +171,7 @@ with tf.Session() as sess:
         plt.yticks([])
         plt.axis('off')
 
+        # Bottom right: Samples
         ax3 = plt.subplot(gs[3])
         img = sample_plt
         plt.imshow(img[:, :, 0], cmap='gray', interpolation='None')
@@ -156,6 +182,10 @@ with tf.Session() as sess:
 
         img_path = os.path.join(samples_dir,
                                 'sample_%s_%s.png' % (args.set, i))
-        plt.savefig(img_path, bbox_inches='tight', pad_inches=0, format='png', dpi=1000)
+        plt.savefig(img_path,
+                    bbox_inches='tight',
+                    pad_inches=0,
+                    format='png',
+                    dpi=1000)
 
         plt.close('all')
