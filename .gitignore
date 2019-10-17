@@ -1,0 +1,6 @@
+.DS_Store
+
+metadata/*/samples/*
+metadata/*/_samples/*
+
+__pycache__/
