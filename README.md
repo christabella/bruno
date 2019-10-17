@@ -105,6 +105,7 @@ CUDA_VISIBLE_DEVICES=0 python3 -m config_rnn.train_finetune  --config_name bn2_o
 **Generating samples**
 
 ```
+srun -t 00:15:00 --gres=gpu:1 python3 -m config_rnn.test_samples  --config_name bn2_omniglot_tp_ft_1s_20w
 CUDA_VISIBLE_DEVICES=0 python3 -m config_rnn.test_samples  --config_name bn2_omniglot_tp_ft_1s_20w
 ```
 
