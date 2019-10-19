@@ -11,7 +11,7 @@ class ShapenetConditionalNPDataIterator():
     batch_size: [usually 4] 
     """
     def __init__(self, seq_len, batch_size, set='train', rng=None):
-        # x and y are... image samples and
+        # Images, labels, and angles [N, 2].
         self.x, self.y, self.info = utils_conditional.load_shapenet(set)
 
         self.n_samples = len(self.x)
@@ -21,6 +21,7 @@ class ShapenetConditionalNPDataIterator():
         print(set, self.classes)
         self.y2idxs = defaultdict(list)
         for i in range(self.n_samples):
+            # Dictionary of class_idx : [indices from this class]
             self.y2idxs[self.y[i]].append(i)
 
         self.seq_len = seq_len
@@ -39,6 +40,10 @@ class ShapenetConditionalNPDataIterator():
         return np.sin(angle_rad), np.cos(angle_rad)
 
     def deprocess_angle(self, x):
+        """Accepts x1, x2 which are sin(angle) and cos(angle) where angle is in radians.
+
+        Returns angle in degrees.
+        """
         x1, x2 = x
         angle = np.arctan2(x1, x2) * 180 / np.pi
         angle += 360 if angle < 0 else 0
@@ -80,11 +85,18 @@ class ShapenetConditionalNPDataIterator():
                             rng=None,
                             noise_rng=None,
                             random_classes=True):
+        """
+        Generator yielding, for each label (e.g. digit or type of chair/plane),
+        batches of sequences of randomly-chosen images and indices.
+        """
         rng = self.rng if rng is None else rng
         noise_rng = self.rng if noise_rng is None else noise_rng
         if random_classes:
             rng.shuffle(self.classes)
         for c in self.classes:
+            # x_batch has shape (batch size, seq len, img height, img width)
+            # y_batch has shape (batch size, seq len, angle_dims)
+            # where angle_dims = 2 (sin and cos)
             x_batch = np.zeros((
                 self.batch_size,
                 self.seq_len,
@@ -92,7 +104,7 @@ class ShapenetConditionalNPDataIterator():
                                dtype='float32')
             y_batch = np.zeros((self.batch_size, ) + self.get_label_size(),
                                dtype='float32')
-
+            # Populate x batch with #(seq_len) random images
             for i in range(self.batch_size):
                 img_idxs = rng.choice(self.y2idxs[c],
                                       size=self.seq_len,
@@ -101,6 +113,8 @@ class ShapenetConditionalNPDataIterator():
                 for j in range(self.seq_len):
                     x_batch[i, j] = self.x[img_idxs[j]]
                     y_batch[i, j] = self.info[img_idxs[j]]
-
+            # To make good use of modelling densities, the Real NVP has to
+            # treat its inputs as instances of a continuous random variable.
+            # Integer pixel values in x are dequantised by adding uniform noise
             x_batch += noise_rng.uniform(size=x_batch.shape)
-            yield x_batch, y_batch
+            yield c, x_batch, y_batch

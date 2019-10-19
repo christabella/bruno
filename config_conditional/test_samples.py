@@ -89,9 +89,10 @@ with tf.Session() as sess:
     print('restoring parameters from', ckpt_file)
     saver.restore(sess, tf.train.latest_checkpoint(save_dir))
 
-    for i, (x_batch, y_batch) in enumerate(generator):
-        print(i, "Generating samples...")
+    for i, (class_label, x_batch, y_batch) in enumerate(generator):
+        print(i, f"Generating samples for {class_label}...")
         feed_dict = {x_in: x_batch, y_label: y_batch}
+        # xx are samples from BRUNO model
         sampled_xx = []
         for _ in range(args.n_samples):
             sampled_xx.append(sess.run(samples, feed_dict))
@@ -108,7 +109,7 @@ with tf.Session() as sess:
                 if j < config.n_context:
                     angle = -1
                 angles.append(angle)
-
+            # Sort x, y, and xx by angles
             angles_argsort = np.argsort(angles)
             sampled_xx = sampled_xx[:, angles_argsort]
             x_batch = x_batch[:, angles_argsort]
