@@ -21,7 +21,8 @@ train_data_iter = data_iter_conditional.ShapenetConditionalNPDataIterator(
 test_data_iter = data_iter_conditional.ShapenetConditionalNPDataIterator(
     seq_len=seq_len, batch_size=batch_size, set='test', rng=rng_test)
 
-obs_shape = train_data_iter.get_observation_size()  # (seq_len, 32,32,1)
+obs_shape = train_data_iter.get_observation_size(
+)  # (seq_len, 32, 32, channels=1)
 label_shape = train_data_iter.get_label_size()  # (seq_len, 2)
 print('obs shape', obs_shape)
 print('label shape', label_shape)
@@ -32,17 +33,24 @@ corr_init = np.ones((ndim, ), dtype='float32') * 0.1
 optimizer = 'rmsprop'
 learning_rate = 0.001
 lr_decay = 0.999995
-scale_student_grad = 1.
-student_grad_schedule = {0: 0., 500: 0.5, 1000: 1.}
+scale_gp_grad = 1.
+gp_grad_schedule = {0: 0., 500: 0.5, 1000: 1.}
 max_iter = 200000
 save_every = 5000
 
 nvp_layers = []
 nvp_dense_layers = []
-student_layer = None
+gp_layer = None
 
 
 def build_model(x, y_label, init=False, sampling_mode=False):
+    """
+    If sampling_mode:
+        return x_samples
+    else:
+        return log_probs, log_probs, log_probs
+
+    """
     global nvp_layers
     global nvp_dense_layers
     with arg_scope([nn_extra_nvp.conv2d_wn, nn_extra_nvp.dense_wn], init=init):
@@ -52,9 +60,9 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         if len(nvp_dense_layers) == 0:
             build_nvp_dense_model()
 
-        global student_layer
-        if student_layer is None:
-            student_layer = nn_extra_gauss.GaussianRecurrentLayer(
+        global gp_layer
+        if gp_layer is None:
+            gp_layer = nn_extra_gauss.GaussianRecurrentLayer(
                 shape=(ndim, ), corr_init=corr_init)
 
         x_shape = nn_extra_nvp.int_shape(x)
@@ -103,36 +111,36 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         z_samples = []
 
         with tf.variable_scope("one_step", reuse=tf.AUTO_REUSE) as scope:
-            student_layer.reset()
+            gp_layer.reset()
             if sampling_mode:
                 if n_context > 0:
                     for i in range(n_context):
-                        student_layer.update_distribution(z_vec[:, i, :])
+                        gp_layer.update_distribution(z_vec[:, i, :])
                     for i in range(seq_len):
-                        z_sample = student_layer.sample(nr_samples=1)
+                        z_sample = gp_layer.sample(nr_samples=1)
                         z_samples.append(z_sample)
                 else:
                     for i in range(seq_len):
-                        z_sample = student_layer.sample(nr_samples=1)
+                        z_sample = gp_layer.sample(nr_samples=1)
                         z_samples.append(z_sample)
-                        student_layer.update_distribution(z_vec[:, i, :])
+                        gp_layer.update_distribution(z_vec[:, i, :])
             else:
                 if n_context > 0:
                     for i in range(n_context):
-                        student_layer.update_distribution(z_vec[:, i, :])
+                        gp_layer.update_distribution(z_vec[:, i, :])
 
                     for i in range(n_context, seq_len):
-                        latent_log_prob = student_layer.get_log_likelihood(
+                        latent_log_prob = gp_layer.get_log_likelihood(
                             z_vec[:, i, :])
                         log_prob = latent_log_prob + log_det_jac[:, i]
                         log_probs.append(log_prob)
-                else:
+                else:  # Sampling from prior
                     for i in range(seq_len):
-                        latent_log_prob = student_layer.get_log_likelihood(
+                        latent_log_prob = gp_layer.get_log_likelihood(
                             z_vec[:, i, :])
                         log_prob = latent_log_prob + log_det_jac[:, i]
                         log_probs.append(log_prob)
-                        student_layer.update_distribution(z_vec[:, i, :])
+                        gp_layer.update_distribution(z_vec[:, i, :])
 
         if sampling_mode:
             z_samples = tf.concat(z_samples, 1)
@@ -158,12 +166,15 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                                     x_shape[2], x_shape[3], x_shape[4]))
             return x_samples
 
+        # Reshape from (N, A, B, C) to (A, N, B, C)
+        # Kind of "zipping" the log probs
         log_probs = tf.stack(log_probs, axis=1)
 
         return log_probs, log_probs, log_probs
 
 
 def build_nvp_model():
+    # Appends to global nvp_layers.
     global nvp_layers
     num_scales = 3
     num_filters = 64

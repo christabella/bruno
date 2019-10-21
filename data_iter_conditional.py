@@ -12,6 +12,7 @@ class ShapenetConditionalNPDataIterator():
     """
     def __init__(self, seq_len, batch_size, set='train', rng=None):
         # Images, labels, and angles [N, 2].
+        # Images: (len(images), image_height, image_width, image_channels)
         self.x, self.y, self.info = utils_conditional.load_shapenet(set)
 
         self.n_samples = len(self.x)
@@ -50,6 +51,9 @@ class ShapenetConditionalNPDataIterator():
         return angle
 
     def get_label_size(self):
+        """Return (seq_len, info_size) since self.info is [N, info_size]
+        where info_size==2 for shapenet.
+        """
         return (self.seq_len, self.info.shape[-1])
 
     def get_observation_size(self):
@@ -94,7 +98,7 @@ class ShapenetConditionalNPDataIterator():
         if random_classes:
             rng.shuffle(self.classes)
         for c in self.classes:
-            # x_batch has shape (batch size, seq len, img height, img width)
+            # x_batch has shape (batch size, seq len, img height, img width, channels)
             # y_batch has shape (batch size, seq len, angle_dims)
             # where angle_dims = 2 (sin and cos)
             x_batch = np.zeros((
