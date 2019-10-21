@@ -7,6 +7,7 @@ import time
 import matplotlib
 import numpy as np
 import tensorflow as tf
+from PIL import Image
 
 import utils
 
@@ -115,29 +116,53 @@ with tf.Session() as sess:
             x_batch = x_batch[:, angles_argsort]
             y_batch = y_batch[:, angles_argsort]
 
-        fs = 2
+        fs = 2  # Frame size (width of red frame around context point).
 
         x_seq = x_batch[0]
+        # x_seq: (seq_len, 32, 32, 1)
         x_plt = x_seq.swapaxes(0, 1)
+        # x_plt: (32, seq_len, 32, 1)
         x_plt = x_plt.reshape((img_dim, config.seq_len * img_dim, n_channels))
+        # x_plt.shape: (32, 30 * 32 = 960, 1)
         if np.max(x_plt) >= 255.:
             x_plt /= 256.
-
+        # Only context ground truth
         x_context = x_plt[:, :config.n_context * img_dim]
-        x_plt_framed = np.zeros(
+        x_context_framed = np.zeros(
             (x_context.shape[0] + 2 * fs, x_context.shape[1] + 2 * fs, 3))
-        x_plt_framed[fs:-fs, fs:-fs, :] += x_context
-        x_plt_framed[:fs, :, 0] = 1
-        x_plt_framed[-fs:, :, 0] = 1
-        x_plt_framed[:, :fs, 0] = 1
-        x_plt_framed[:, -fs:, 0] = 1
-        x_context = np.copy(x_plt_framed)
+        x_context_framed[fs:-fs, fs:-fs, :] += x_context
+        x_context_framed[:fs, :, 0] = 1
+        x_context_framed[-fs:, :, 0] = 1
+        x_context_framed[:, :fs, 0] = 1
+        x_context_framed[:, -fs:, 0] = 1
+        x_context = np.copy(x_context_framed)
 
+        # The rest of the ground truth
         x_plt = x_plt[:, config.n_context * img_dim:]
-
+        # Create gif from samples!
+        # sampled_xx: (3, 30, 32, 32, 1), i.e.
+        # (n_samples, seq_len, img height, img width, img channels)
+        for s in range(args.n_samples):
+            frames = []
+            for f in range(config.seq_len):
+                img = sampled_xx[s, f]
+                # Remove last channel (monochrome) for PIL
+                img = np.squeeze(img, axis=-1)
+                img = img * 255  # Needs to be 0-255 for PIL
+                frame = Image.fromarray(
+                    img, mode='F')  # Mode is floating point; can also be RGB
+                frames.append(frame)
+            img_path = os.path.join(samples_dir, f'sample_test_{i}-{s}.gif')
+            frames[0].save(img_path,
+                           append_images=frames[1:],
+                           save_all=True,
+                           duration=100,
+                           loop=0)
+        # Samples
         sample_plt = sampled_xx.reshape(
             (args.n_samples, (config.seq_len), img_dim, img_dim, n_channels))
         sample_plt = sample_plt.swapaxes(1, 2)
+        # Plot entire columns across different images.
         sample_plt = sample_plt.reshape(
             (args.n_samples * img_dim, config.seq_len * img_dim, n_channels))
         sample_plt = sample_plt[:, config.n_context * img_dim:]
