@@ -5,18 +5,20 @@ import numpy as np
 from PIL import Image
 
 import utils
-
 """
 Shapenet code is taken from https://github.com/Gordonjo/versa
 """
 
 
 def get_subdirs(a_dir):
-    return [os.path.join(a_dir, name) for name in os.listdir(a_dir)
-            if os.path.isdir(os.path.join(a_dir, name))]
+    return [
+        os.path.join(a_dir, name) for name in os.listdir(a_dir)
+        if os.path.isdir(os.path.join(a_dir, name))
+    ]
 
 
-def load_pngs_and_save_as_npy(input_dir, save_file, model_type, size, convert_to_grayscale):
+def load_pngs_and_save_as_npy(input_dir, save_file, model_type, size,
+                              convert_to_grayscale):
     data = []
     items = get_subdirs(input_dir)
     for item_index, item in enumerate(items):
@@ -47,9 +49,11 @@ def load_pngs_and_save_as_npy(input_dir, save_file, model_type, size, convert_to
             if size:
                 im = im.resize((size, size), resample=Image.LANCZOS)
             if convert_to_grayscale:
-                image = np.array(im.getdata()).astype('float32').reshape(size, size) / 255.  # grayscale image
+                image = np.array(im.getdata()).astype('float32').reshape(
+                    size, size) / 255.  # grayscale image
             else:
-                image = np.array(im.getdata()).astype('float32').reshape(size, size, 3) / 255.  # colour image
+                image = np.array(im.getdata()).astype('float32').reshape(
+                    size, size, 3) / 255.  # colour image
             item_images.append((image, item_index, instance_index))
 
         data.append(item_images)
@@ -63,19 +67,33 @@ def process_shapenet():
     chairs_dir = '03001627'
 
     print('Starting ShapeNet planes.')
-    load_pngs_and_save_as_npy(os.path.join(data_dir, planes_dir), data_dir + '/shapenet_planes.npy',
-                              model_type='plane', size=32, convert_to_grayscale=True)
+    load_pngs_and_save_as_npy(os.path.join(data_dir, planes_dir),
+                              data_dir + '/shapenet_planes.npy',
+                              model_type='plane',
+                              size=32,
+                              convert_to_grayscale=True)
     print('Finished ShapeNet planes')
 
     print('Starting ShapeNet chairs.')
-    load_pngs_and_save_as_npy(os.path.join(data_dir, chairs_dir), data_dir + '/shapenet_chairs.npy',
-                              model_type='chair', size=32, convert_to_grayscale=True)
+    load_pngs_and_save_as_npy(os.path.join(data_dir, chairs_dir),
+                              data_dir + '/shapenet_chairs.npy',
+                              model_type='chair',
+                              size=32,
+                              convert_to_grayscale=True)
     print('Finished ShapeNet chairs')
 
 
-def load_shapenet(set='train', train_fraction=0.7, val_fraction=0.1, num_instances_per_item=36, image_height=32,
-                  image_width=32, image_channels=1):
-    data_paths = ['data/shapenet/shapenet_planes.npy', 'data/shapenet/shapenet_chairs.npy']
+def load_shapenet(set='train',
+                  train_fraction=0.7,
+                  val_fraction=0.1,
+                  num_instances_per_item=36,
+                  image_height=32,
+                  image_width=32,
+                  image_channels=1):
+    data_paths = [
+        'data/shapenet/shapenet_planes.npy',
+        'data/shapenet/shapenet_chairs.npy'
+    ]
     x, y, angles = [], [], []
     for p in data_paths:
         data = np.load(p)
@@ -85,23 +103,22 @@ def load_shapenet(set='train', train_fraction=0.7, val_fraction=0.1, num_instanc
         val_size = (int)(val_fraction * total_items)
         print("Training Set Size = {0:d}".format(train_size))
         print("Validation Set Size = {0:d}".format(val_size))
-        print("Test Set Size = {0:d}".format(total_items - train_size - val_size))
+        print("Test Set Size = {0:d}".format(total_items - train_size -
+                                             val_size))
         rng = np.random.RandomState(42)
         rng.shuffle(data)
         if set == 'train':
-            train_images, train_item_indices, train_item_angles = shapenet_extract_data(data[:train_size],
-                                                                                        num_instances_per_item,
-                                                                                        image_height,
-                                                                                        image_width, image_channels)
+            train_images, train_item_indices, train_item_angles = shapenet_extract_data(
+                data[:train_size], num_instances_per_item, image_height,
+                image_width, image_channels)
         elif set == 'valid':
             train_images, train_item_indices, train_item_angles = shapenet_extract_data(
-                data[train_size:train_size + val_size], num_instances_per_item, image_height,
-                image_width, image_channels)
+                data[train_size:train_size + val_size], num_instances_per_item,
+                image_height, image_width, image_channels)
         elif set == 'test':
-            train_images, train_item_indices, train_item_angles = shapenet_extract_data(data[train_size + val_size:],
-                                                                                        num_instances_per_item,
-                                                                                        image_height,
-                                                                                        image_width, image_channels)
+            train_images, train_item_indices, train_item_angles = shapenet_extract_data(
+                data[train_size + val_size:], num_instances_per_item,
+                image_height, image_width, image_channels)
         else:
             raise ValueError('wrong set')
 
@@ -120,7 +137,8 @@ def load_shapenet(set='train', train_fraction=0.7, val_fraction=0.1, num_instanc
     return x, y, angles
 
 
-def shapenet_extract_data(data, num_instances_per_item, image_height, image_width, image_channels):
+def shapenet_extract_data(data, num_instances_per_item, image_height,
+                          image_width, image_channels):
     """
     Unpack ShapeNet data.
     """
@@ -129,8 +147,12 @@ def shapenet_extract_data(data, num_instances_per_item, image_height, image_widt
         for m, instance in enumerate(item):
             images.append(instance[0])
             item_indices.append(item_index)
-            item_angles.append(shapenet_convert_index_to_angle(instance[2], num_instances_per_item))
-    images = np.reshape(np.array(images), (len(images), image_height, image_width, image_channels))
+            item_angles.append(
+                shapenet_convert_index_to_angle(instance[2],
+                                                num_instances_per_item))
+    images = np.reshape(
+        np.array(images),
+        (len(images), image_height, image_width, image_channels))
     indices, angles = np.array(item_indices), np.array(item_angles)
     return images, indices, angles
 
