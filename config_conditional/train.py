@@ -14,12 +14,22 @@ import utils
 
 # -----------------------------------------------------------------------------
 parser = argparse.ArgumentParser()
-parser.add_argument('--config_name', type=str, required=True, help='Configuration name')
-parser.add_argument('--nr_gpu', type=int, default=1, help='How many GPUs to distribute the training across?')
-parser.add_argument('--resume', type=int, default=0, help='Resume training from a checkpoint?')
+parser.add_argument('--config_name',
+                    type=str,
+                    required=True,
+                    help='Configuration name')
+parser.add_argument('--nr_gpu',
+                    type=int,
+                    default=1,
+                    help='How many GPUs to distribute the training across?')
+parser.add_argument('--resume',
+                    type=int,
+                    default=0,
+                    help='Resume training from a checkpoint?')
 args = parser.parse_args()
 print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))
-assert args.nr_gpu == len(''.join(filter(str.isdigit, os.environ["CUDA_VISIBLE_DEVICES"])))
+assert args.nr_gpu == len(''.join(
+    filter(str.isdigit, os.environ["CUDA_VISIBLE_DEVICES"])))
 # -----------------------------------------------------------------------------
 np.random.seed(seed=42)
 tf.reset_default_graph()
@@ -29,7 +39,8 @@ tf.set_random_seed(0)
 configs_dir = __file__.split('/')[-2]
 config = importlib.import_module('%s.%s' % (configs_dir, args.config_name))
 if not args.resume:
-    experiment_id = '%s-%s' % (args.config_name.split('.')[-1], time.strftime("%Y_%m_%d", time.localtime()))
+    experiment_id = '%s-%s' % (args.config_name.split('.')[-1],
+                               time.strftime("%Y_%m_%d", time.localtime()))
     utils.autodir('metadata')
     save_dir = 'metadata/' + experiment_id
     utils.autodir(save_dir)
@@ -56,8 +67,10 @@ if args.resume:
 model = tf.make_template('model', config.build_model)
 
 # run once for data dependent initialization of parameters
-x_init = tf.placeholder(tf.float32, shape=(config.batch_size,) + config.obs_shape)
-y_init = tf.placeholder(tf.float32, shape=(config.batch_size,) + config.label_shape)
+x_init = tf.placeholder(tf.float32,
+                        shape=(config.batch_size, ) + config.obs_shape)
+y_init = tf.placeholder(tf.float32,
+                        shape=(config.batch_size, ) + config.label_shape)
 init_pass = model(x_init, y_init, init=True)[0]
 
 all_params = tf.trainable_variables()
@@ -77,14 +90,23 @@ grads = []
 train_losses = []
 
 # evaluation in case we want to validate
-x_in_eval = tf.placeholder(tf.float32, shape=(config.batch_size,) + config.obs_shape)
-y_in_eval = tf.placeholder(tf.float32, shape=(config.batch_size,) + config.label_shape)
+x_in_eval = tf.placeholder(tf.float32,
+                           shape=(config.batch_size, ) + config.obs_shape)
+y_in_eval = tf.placeholder(tf.float32,
+                           shape=(config.batch_size, ) + config.label_shape)
 log_probs = model(x_in_eval, y_in_eval)[0]
-eval_loss = config.eval_loss(log_probs) if hasattr(config, 'eval_loss') else config.loss(log_probs)
+eval_loss = config.eval_loss(log_probs) if hasattr(
+    config, 'eval_loss') else config.loss(log_probs)
 
 for i in range(args.nr_gpu):
-    xs.append(tf.placeholder(tf.float32, shape=(config.batch_size / args.nr_gpu,) + config.obs_shape))
-    ys.append(tf.placeholder(tf.float32, shape=(config.batch_size / args.nr_gpu,) + config.label_shape))
+    xs.append(
+        tf.placeholder(tf.float32,
+                       shape=(config.batch_size / args.nr_gpu, ) +
+                       config.obs_shape))
+    ys.append(
+        tf.placeholder(tf.float32,
+                       shape=(config.batch_size / args.nr_gpu, ) +
+                       config.label_shape))
     with tf.device('/gpu:%d' % i):
         # train
         with tf.variable_scope('gpu_%d' % i):
@@ -124,14 +146,18 @@ with tf.device('/gpu:0'):
     with tf.control_dependencies(update_ops_gpu0):
         if hasattr(config, 'optimizer') and config.optimizer == 'rmsprop':
             print('using rmsprop')
-            train_step = tf.train.RMSPropOptimizer(learning_rate=tf_lr).apply_gradients(
-                grads_and_vars=grads_and_vars,
-                global_step=None, name='rmsprop')
+            train_step = tf.train.RMSPropOptimizer(
+                learning_rate=tf_lr).apply_gradients(
+                    grads_and_vars=grads_and_vars,
+                    global_step=None,
+                    name='rmsprop')
         else:
             print('using adam')
-            train_step = tf.train.AdamOptimizer(learning_rate=tf_lr).apply_gradients(
-                grads_and_vars=grads_and_vars,
-                global_step=None, name='adam')
+            train_step = tf.train.AdamOptimizer(
+                learning_rate=tf_lr).apply_gradients(
+                    grads_and_vars=grads_and_vars,
+                    global_step=None,
+                    name='adam')
 
 train_loss = train_losses[0]
 
@@ -161,17 +187,21 @@ with tf.Session() as sess:
         saver.restore(sess, tf.train.latest_checkpoint(save_dir))
 
     prev_time = time.clock()
-    for iteration, (x_batch, y_batch) in zip(batch_idxs, train_data_iter.generate()):
+    for iteration, (x_batch, y_batch) in zip(batch_idxs,
+                                             train_data_iter.generate()):
 
-
-        if hasattr(config, 'learning_rate_schedule') and iteration in config.learning_rate_schedule:
+        if hasattr(config, 'learning_rate_schedule'
+                   ) and iteration in config.learning_rate_schedule:
             lr = np.float32(config.learning_rate_schedule[iteration])
         elif hasattr(config, 'lr_decay'):
             lr *= config.lr_decay
 
-        if hasattr(config, 'student_grad_schedule') and iteration in config.student_grad_schedule:
-            student_grad_scale = np.float32(config.student_grad_schedule[iteration])
-            print('setting student grad scale to %.7f' % config.student_grad_schedule[iteration])
+        if hasattr(config, 'student_grad_schedule'
+                   ) and iteration in config.student_grad_schedule:
+            student_grad_scale = np.float32(
+                config.student_grad_schedule[iteration])
+            print('setting student grad scale to %.7f' %
+                  config.student_grad_schedule[iteration])
 
         if args.resume and iteration < last_iteration:
             if iteration % (print_every * 10) == 0:
@@ -200,25 +230,32 @@ with tf.Session() as sess:
                 avg_train_loss = np.mean(train_iter_losses)
                 losses_avg_train.append(avg_train_loss)
                 train_iter_losses = []
-                print('%d/%d train_loss=%6.8f bits/value=%.3f' % (
-                    iteration + 1, config.max_iter, avg_train_loss, avg_train_loss / config.ndim / np.log(2.)))
+                print('%d/%d train_loss=%6.8f bits/value=%.3f' %
+                      (iteration + 1, config.max_iter, avg_train_loss,
+                       avg_train_loss / config.ndim / np.log(2.)))
                 corr = config.student_layer.corr.eval().flatten()
 
             if (iteration + 1) % config.save_every == 0:
                 current_time = time.time()
-                eta_time = (config.max_iter - iteration) / config.save_every * (current_time - prev_time)
+                eta_time = (config.max_iter - iteration
+                            ) / config.save_every * (current_time - prev_time)
                 prev_time = current_time
-                print('ETA: ', time.strftime("%H:%M:%S", time.gmtime(eta_time)))
-                print('Saving model (iteration %s):' % iteration, experiment_id)
+                print('ETA: ', time.strftime("%H:%M:%S",
+                                             time.gmtime(eta_time)))
+                print('Saving model (iteration %s):' % iteration,
+                      experiment_id)
                 print('current learning rate:', lr)
                 saver.save(sess, save_dir + '/params.ckpt')
 
                 with open(save_dir + '/meta.pkl', 'wb') as f:
-                    pickle.dump({'lr': lr,
-                                 'iteration': iteration + 1,
-                                 'losses_avg_train': losses_avg_train,
-                                 'losses_eval_valid': losses_eval_valid,
-                                 'losses_eval_train': losses_eval_train}, f)
+                    pickle.dump(
+                        {
+                            'lr': lr,
+                            'iteration': iteration + 1,
+                            'losses_avg_train': losses_avg_train,
+                            'losses_eval_valid': losses_eval_valid,
+                            'losses_eval_train': losses_eval_train
+                        }, f)
 
                 corr = config.student_layer.corr.eval().flatten()
                 print('0.01', np.sum(corr > 0.01))
@@ -233,6 +270,8 @@ with tf.Session() as sess:
 
                 if hasattr(config.student_layer, 'nu'):
                     nu = config.student_layer.nu.eval().flatten()
-                    print('nu median-min-max:', np.median(nu), np.min(nu), np.max(nu))
+                    print('nu median-min-max:', np.median(nu), np.min(nu),
+                          np.max(nu))
 
-print('Total time: ', time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
+print('Total time: ',
+      time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
