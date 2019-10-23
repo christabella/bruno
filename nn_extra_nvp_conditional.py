@@ -19,7 +19,8 @@ def logit_forward_and_jacobian(x, sum_log_det_jacobians):
 def dequantization_forward_and_jacobian(x, sum_log_det_jacobians):
     x_shape = int_shape(x)
     y = x / 256.0
-    sum_log_det_jacobians -= tf.log(256.0) * x_shape[1] * x_shape[2] * x_shape[3]
+    sum_log_det_jacobians -= tf.log(
+        256.0) * x_shape[1] * x_shape[2] * x_shape[3]
     return y, sum_log_det_jacobians
 
 
@@ -32,7 +33,13 @@ class Layer():
 
 
 class CouplingLayerConv(Layer):
-    def __init__(self, mask_type, name='CouplingLayer', nonlinearity=tf.nn.relu, weight_norm=True, num_filters=64,
+    """RealNVP Coupling Layer"""
+    def __init__(self,
+                 mask_type,
+                 name='CouplingLayerConv',
+                 nonlinearity=tf.nn.relu,
+                 weight_norm=True,
+                 num_filters=64,
                  num_res_blocks=8):
         self.mask_type = mask_type
         self.name = name
@@ -51,73 +58,130 @@ class CouplingLayerConv(Layer):
                 kernel_size = 3
                 n_input_channels = xs[3]
 
-                y = conv2d(x, num_filters, 1, nonlinearity=self.nonlinearity,
-                           kernel_initializer=Orthogonal(), name='c1', y_label=y_label)
+                y = conv2d(x,
+                           num_filters,
+                           1,
+                           nonlinearity=self.nonlinearity,
+                           kernel_initializer=Orthogonal(),
+                           name='c1',
+                           y_label=y_label)
 
                 skip = y
                 for r in range(self.num_res_blocks):
-                    y = conv2d(y, num_filters, kernel_size, nonlinearity=self.nonlinearity,
-                               kernel_initializer=Orthogonal(), name='c2_%d' % r, y_label=y_label)
+                    y = conv2d(y,
+                               num_filters,
+                               kernel_size,
+                               nonlinearity=self.nonlinearity,
+                               kernel_initializer=Orthogonal(),
+                               name='c2_%d' % r,
+                               y_label=y_label)
 
-                    y = conv2d(y, num_filters, kernel_size, nonlinearity=None,
-                               kernel_initializer=Orthogonal(), name='c3_%d' % r, y_label=y_label)
+                    y = conv2d(y,
+                               num_filters,
+                               kernel_size,
+                               nonlinearity=None,
+                               kernel_initializer=Orthogonal(),
+                               name='c3_%d' % r,
+                               y_label=y_label)
 
                     y += skip
                     y = self.nonlinearity(y)
                     skip = y
 
-                l_scale = conv2d(y, n_input_channels, 1, nonlinearity=tf.tanh,
-                                 kernel_initializer=tf.constant_initializer(0.),
-                                 bias_initializer=tf.constant_initializer(0.),
-                                 name='conv_out_scale', y_label=y_label)
+                l_scale = conv2d(
+                    y,
+                    n_input_channels,
+                    1,
+                    nonlinearity=tf.tanh,
+                    kernel_initializer=tf.constant_initializer(0.),
+                    bias_initializer=tf.constant_initializer(0.),
+                    name='conv_out_scale',
+                    y_label=y_label)
 
                 l_scale *= 1 - mask
 
-                m_translation = conv2d(y, n_input_channels, 1, nonlinearity=None,
-                                       kernel_initializer=tf.constant_initializer(0.),
-                                       bias_initializer=tf.constant_initializer(0.),
-                                       name='conv_out_translation', y_label=y_label)
+                m_translation = conv2d(
+                    y,
+                    n_input_channels,
+                    1,
+                    nonlinearity=None,
+                    kernel_initializer=tf.constant_initializer(0.),
+                    bias_initializer=tf.constant_initializer(0.),
+                    name='conv_out_translation',
+                    y_label=y_label)
                 m_translation *= 1 - mask
 
                 return l_scale, m_translation
 
     def function_s_t_wn(self, x, mask, y_label, name):
+        """Scaling and translation functions s and t are
+        fully-connected neural networks.
+
+        s and t share the parameters in the first two dense layers with 1024
+        hidden units and ELU nonlinearity. Their output layers are different:
+        s ends with a dense layer with tanh and t ends with a dense layer
+        without a nonlinearity.
+        """
         with tf.variable_scope(name):
             num_filters = self.num_filters
             xs = int_shape(x)
             kernel_size = 3
             n_input_channels = xs[3]
 
-            y = conv2d_wn(x, num_filters, 'c1', filter_size=[1, 1], nonlinearity=self.nonlinearity, y_label=y_label)
+            y = conv2d_wn(x,
+                          num_filters,
+                          'c1',
+                          filter_size=[1, 1],
+                          nonlinearity=self.nonlinearity,
+                          y_label=y_label)
 
             skip = y
             for r in range(self.num_res_blocks):
-                y = conv2d_wn(y, num_filters, 'c2_%d' % r, filter_size=[kernel_size, kernel_size],
-                              nonlinearity=self.nonlinearity, y_label=y_label)
-                y = conv2d_wn(y, num_filters, 'c3_%d' % r, filter_size=[kernel_size, kernel_size], nonlinearity=None,
+                y = conv2d_wn(y,
+                              num_filters,
+                              'c2_%d' % r,
+                              filter_size=[kernel_size, kernel_size],
+                              nonlinearity=self.nonlinearity,
+                              y_label=y_label)
+                y = conv2d_wn(y,
+                              num_filters,
+                              'c3_%d' % r,
+                              filter_size=[kernel_size, kernel_size],
+                              nonlinearity=None,
                               y_label=y_label)
 
                 y += skip
                 y = self.nonlinearity(y)
                 skip = y
 
-            l_scale = conv2d(y, n_input_channels, 1, nonlinearity=tf.tanh,
+            l_scale = conv2d(y,
+                             n_input_channels,
+                             1,
+                             nonlinearity=tf.tanh,
                              kernel_initializer=tf.constant_initializer(0.),
                              bias_initializer=tf.constant_initializer(0.),
-                             name='conv_out_scale', y_label=y_label)
+                             name='conv_out_scale',
+                             y_label=y_label)
             l_scale *= 1 - mask
 
-            m_translation = conv2d(y, n_input_channels, 1, nonlinearity=None,
-                                   kernel_initializer=tf.constant_initializer(0.),
-                                   bias_initializer=tf.constant_initializer(0.),
-                                   name='conv_out_translation', y_label=y_label)
+            m_translation = conv2d(
+                y,
+                n_input_channels,
+                1,
+                nonlinearity=None,
+                kernel_initializer=tf.constant_initializer(0.),
+                bias_initializer=tf.constant_initializer(0.),
+                name='conv_out_translation',
+                y_label=y_label)
             m_translation *= 1 - mask
 
             return l_scale, m_translation
 
     def get_mask(self, xs, mask_type):
 
-        assert self.mask_type in ['checkerboard0', 'checkerboard1', 'channel0', 'channel1']
+        assert self.mask_type in [
+            'checkerboard0', 'checkerboard1', 'channel0', 'channel1'
+        ]
 
         if 'checkerboard' in mask_type:
             unit0 = tf.constant([[0.0, 1.0], [1.0, 0.0]])
@@ -142,6 +206,7 @@ class CouplingLayerConv(Layer):
             # masked half of x
             x1 = x * b
             l, m = self.function_s_t(x1, b, y_label)
+            # l: s(x1); m: t(x1)
             y = x1 + tf.multiply(1. - b, x * tf.exp(l) + m)
             log_det_jacobian = tf.reduce_sum(l, [1, 2, 3])
             sum_log_det_jacobians += log_det_jacobian
@@ -160,8 +225,14 @@ class CouplingLayerConv(Layer):
 
 
 class CouplingLayerDense(CouplingLayerConv):
-    def __init__(self, mask_type, name='CouplingDense', nonlinearity=tf.nn.relu, n_units=1024, weight_norm=True):
-        super(CouplingLayerDense, self).__init__(mask_type, name, nonlinearity, weight_norm)
+    def __init__(self,
+                 mask_type,
+                 name='CouplingLayerDense',
+                 nonlinearity=tf.nn.relu,
+                 n_units=1024,
+                 weight_norm=True):
+        super(CouplingLayerDense, self).__init__(mask_type, name, nonlinearity,
+                                                 weight_norm)
         self.mask_type = mask_type
         self.name = name
         self.nonlinearity = nonlinearity
@@ -201,22 +272,39 @@ class CouplingLayerDense(CouplingLayerConv):
                 y = tf.reshape(x, (xs[0], -1))
                 ndim = int_shape(y)[-1]
 
-                y = dense(y, num_units=self.n_units, nonlinearity=self.nonlinearity,
+                y = dense(y,
+                          num_units=self.n_units,
+                          nonlinearity=self.nonlinearity,
                           kernel_initializer=Orthogonal(),
-                          bias_initializer=tf.constant_initializer(0.01), name='d1', y_label=y_label)
-                y = dense(y, num_units=self.n_units, nonlinearity=self.nonlinearity,
+                          bias_initializer=tf.constant_initializer(0.01),
+                          name='d1',
+                          y_label=y_label)
+                y = dense(y,
+                          num_units=self.n_units,
+                          nonlinearity=self.nonlinearity,
                           kernel_initializer=Orthogonal(),
-                          bias_initializer=tf.constant_initializer(0.01), name='d2', y_label=y_label)
+                          bias_initializer=tf.constant_initializer(0.01),
+                          name='d2',
+                          y_label=y_label)
 
-                l_scale = dense(y, num_units=ndim, nonlinearity=tf.tanh,
+                l_scale = dense(y,
+                                num_units=ndim,
+                                nonlinearity=tf.tanh,
                                 kernel_initializer=tf.constant_initializer(0.),
-                                bias_initializer=tf.constant_initializer(0.), name='d_scale', y_label=y_label)
+                                bias_initializer=tf.constant_initializer(0.),
+                                name='d_scale',
+                                y_label=y_label)
                 l_scale = tf.reshape(l_scale, shape=xs)
                 l_scale *= 1 - mask
 
-                m_translation = dense(y, num_units=ndim, nonlinearity=None,
-                                      kernel_initializer=tf.constant_initializer(0.),
-                                      bias_initializer=tf.constant_initializer(0.), name='d_translate', y_label=y_label)
+                m_translation = dense(
+                    y,
+                    num_units=ndim,
+                    nonlinearity=None,
+                    kernel_initializer=tf.constant_initializer(0.),
+                    bias_initializer=tf.constant_initializer(0.),
+                    name='d_translate',
+                    y_label=y_label)
                 m_translation = tf.reshape(m_translation, shape=xs)
                 m_translation *= 1 - mask
 
@@ -228,19 +316,35 @@ class CouplingLayerDense(CouplingLayerConv):
             y = tf.reshape(x, (xs[0], -1))
             ndim = int_shape(y)[-1]
 
-            y = dense_wn(y, units=self.n_units, name='d1', activation=self.nonlinearity, y_label=y_label)
-            y = dense_wn(y, units=self.n_units, name='d2', activation=self.nonlinearity, y_label=y_label)
+            y = dense_wn(y,
+                         units=self.n_units,
+                         name='d1',
+                         activation=self.nonlinearity,
+                         y_label=y_label)
+            y = dense_wn(y,
+                         units=self.n_units,
+                         name='d2',
+                         activation=self.nonlinearity,
+                         y_label=y_label)
 
-            l_scale = dense(y, num_units=ndim, nonlinearity=tf.tanh,
+            l_scale = dense(y,
+                            num_units=ndim,
+                            nonlinearity=tf.tanh,
                             kernel_initializer=tf.constant_initializer(0.),
-                            bias_initializer=tf.constant_initializer(0.), name='d_scale', y_label=y_label)
+                            bias_initializer=tf.constant_initializer(0.),
+                            name='d_scale',
+                            y_label=y_label)
             l_scale = tf.reshape(l_scale, shape=xs)
             l_scale *= 1 - mask
 
-            m_translation = dense(y, num_units=ndim, nonlinearity=None,
-                                  kernel_initializer=tf.constant_initializer(0.),
-                                  bias_initializer=tf.constant_initializer(0.), name='d_translate',
-                                  y_label=y_label)
+            m_translation = dense(
+                y,
+                num_units=ndim,
+                nonlinearity=None,
+                kernel_initializer=tf.constant_initializer(0.),
+                bias_initializer=tf.constant_initializer(0.),
+                name='d_translate',
+                y_label=y_label)
             m_translation = tf.reshape(m_translation, shape=xs)
             m_translation *= 1 - mask
 
@@ -303,7 +407,7 @@ class FactorOutLayer(Layer):
 
         zs = int_shape(z)
         if y is None:
-            split = zs[3] // (2 ** self.scale)
+            split = zs[3] // (2**self.scale)
         else:
             split = int_shape(y)[3]
         new_y = z[:, :, :, -split:]
@@ -323,7 +427,6 @@ class Orthogonal(object):
     """
     Lasagne orthogonal init from OpenAI
     """
-
     def __init__(self, scale=1.):
         self.scale = scale
 
@@ -342,46 +445,76 @@ class Orthogonal(object):
         return (self.scale * q[:shape[0], :shape[1]]).astype(np.float32)
 
     def get_config(self):
-        return {
-            'scale': self.scale
-        }
+        return {'scale': self.scale}
 
 
-def dense(x, num_units, name, nonlinearity=None, kernel_initializer=Orthogonal(),
-          bias_initializer=tf.constant_initializer(0.), y_label=None):
+def dense(x,
+          num_units,
+          name,
+          nonlinearity=None,
+          kernel_initializer=Orthogonal(),
+          bias_initializer=tf.constant_initializer(0.),
+          y_label=None):
     with tf.variable_scope(name):
         if y_label is None:
-            return tf.layers.dense(x, units=num_units, activation=nonlinearity,
+            return tf.layers.dense(x,
+                                   units=num_units,
+                                   activation=nonlinearity,
                                    kernel_initializer=kernel_initializer,
-                                   bias_initializer=bias_initializer, name=name)
+                                   bias_initializer=bias_initializer,
+                                   name=name)
         else:
             ndim = int(int_shape(x)[-1] / 2)
-            h = tf.layers.dense(y_label, units=ndim, activation=tf.nn.leaky_relu,
+            h = tf.layers.dense(y_label,
+                                units=ndim,
+                                activation=tf.nn.leaky_relu,
                                 use_bias=True,
-                                kernel_initializer=Orthogonal(), name='label_W1')
+                                kernel_initializer=Orthogonal(),
+                                name='label_W1')
             o1 = tf.concat([h, x], axis=-1)
-            output = tf.layers.dense(o1, units=num_units, activation=None,
+            output = tf.layers.dense(o1,
+                                     units=num_units,
+                                     activation=None,
                                      use_bias=True,
-                                     kernel_initializer=Orthogonal(), name=name)
+                                     kernel_initializer=Orthogonal(),
+                                     name=name)
 
             if nonlinearity is not None:
                 output = nonlinearity(output)
             return output
 
 
-def conv2d(x, num_filters, kernel_size, name, pad='same', nonlinearity=None,
+def conv2d(x,
+           num_filters,
+           kernel_size,
+           name,
+           pad='same',
+           nonlinearity=None,
            kernel_initializer=tf.constant_initializer(0.),
-           bias_initializer=tf.constant_initializer(0.), y_label=None):
+           bias_initializer=tf.constant_initializer(0.),
+           y_label=None):
     with tf.variable_scope(name):
         if y_label is None:
-            return tf.layers.conv2d(x, num_filters, kernel_size, padding=pad, activation=nonlinearity,
+            return tf.layers.conv2d(x,
+                                    num_filters,
+                                    kernel_size,
+                                    padding=pad,
+                                    activation=nonlinearity,
                                     kernel_initializer=kernel_initializer,
                                     bias_initializer=bias_initializer,
                                     name=name)
         else:
-            h = tf.layers.dense(y_label, units=num_filters, activation=None, use_bias=False,
-                                kernel_initializer=Orthogonal(), name='label_h')
-            output = tf.layers.conv2d(x, num_filters, kernel_size, padding=pad, activation=None,
+            h = tf.layers.dense(y_label,
+                                units=num_filters,
+                                activation=None,
+                                use_bias=False,
+                                kernel_initializer=Orthogonal(),
+                                name='label_h')
+            output = tf.layers.conv2d(x,
+                                      num_filters,
+                                      kernel_size,
+                                      padding=pad,
+                                      activation=None,
                                       kernel_initializer=kernel_initializer,
                                       use_bias=True,
                                       name=name)
@@ -393,19 +526,43 @@ def conv2d(x, num_filters, kernel_size, name, pad='same', nonlinearity=None,
 
 
 @add_arg_scope
-def conv2d_wn(x, num_filters, name, filter_size=[3, 3], stride=[1, 1], pad='SAME', nonlinearity=None, init_scale=1.,
-              init=False, ema=None, y_label=None, trainable_bias=True):
+def conv2d_wn(x,
+              num_filters,
+              name,
+              filter_size=[3, 3],
+              stride=[1, 1],
+              pad='SAME',
+              nonlinearity=None,
+              init_scale=1.,
+              init=False,
+              ema=None,
+              y_label=None,
+              trainable_bias=True):
     with tf.variable_scope(name):
         if y_label is None:
-            V = get_var_maybe_avg('V', ema, shape=filter_size + [int(x.get_shape()[-1]), num_filters], dtype=tf.float32,
-                                  initializer=tf.random_normal_initializer(0, 0.05), trainable=True)
-            g = get_var_maybe_avg('g', ema, shape=[num_filters], dtype=tf.float32,
-                                  initializer=tf.constant_initializer(1.), trainable=True)
-            b = get_var_maybe_avg('b', ema, shape=[num_filters], dtype=tf.float32,
-                                  initializer=tf.constant_initializer(0.), trainable=trainable_bias)
+            V = get_var_maybe_avg(
+                'V',
+                ema,
+                shape=filter_size + [int(x.get_shape()[-1]), num_filters],
+                dtype=tf.float32,
+                initializer=tf.random_normal_initializer(0, 0.05),
+                trainable=True)
+            g = get_var_maybe_avg('g',
+                                  ema,
+                                  shape=[num_filters],
+                                  dtype=tf.float32,
+                                  initializer=tf.constant_initializer(1.),
+                                  trainable=True)
+            b = get_var_maybe_avg('b',
+                                  ema,
+                                  shape=[num_filters],
+                                  dtype=tf.float32,
+                                  initializer=tf.constant_initializer(0.),
+                                  trainable=trainable_bias)
 
             # use weight normalization (Salimans & Kingma, 2016)
-            W = tf.reshape(g, [1, 1, 1, num_filters]) * tf.nn.l2_normalize(V, [0, 1, 2])
+            W = tf.reshape(g, [1, 1, 1, num_filters]) * tf.nn.l2_normalize(
+                V, [0, 1, 2])
 
             # calculate convolutional layer output
             x = tf.nn.bias_add(tf.nn.conv2d(x, W, [1] + stride + [1], pad), b)
@@ -413,7 +570,10 @@ def conv2d_wn(x, num_filters, name, filter_size=[3, 3], stride=[1, 1], pad='SAME
             if init:
                 m_init, v_init = tf.nn.moments(x, [0, 1, 2])
                 scale_init = init_scale / tf.sqrt(v_init + 1e-10)
-                with tf.control_dependencies([g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
+                with tf.control_dependencies([
+                        g.assign(g * scale_init),
+                        b.assign_add(-m_init * scale_init)
+                ]):
                     x = tf.identity(x)
 
             if nonlinearity is not None:
@@ -421,10 +581,19 @@ def conv2d_wn(x, num_filters, name, filter_size=[3, 3], stride=[1, 1], pad='SAME
             return x
 
         if y_label is not None:
-            h = dense_wn(y_label, units=num_filters, activation=None, use_bias=False,
-                         init=init, name='label_h')
+            h = dense_wn(y_label,
+                         units=num_filters,
+                         activation=None,
+                         use_bias=False,
+                         init=init,
+                         name='label_h')
 
-            output = conv2d_wn(x, num_filters, name='conv_h', nonlinearity=None, init=init, trainable_bias=True)
+            output = conv2d_wn(x,
+                               num_filters,
+                               name='conv_h',
+                               nonlinearity=None,
+                               init=init,
+                               trainable_bias=True)
 
             output = output + h[:, None, None, :]
 
@@ -434,15 +603,36 @@ def conv2d_wn(x, num_filters, name, filter_size=[3, 3], stride=[1, 1], pad='SAME
 
 
 @add_arg_scope
-def dense_wn(x, units, name, activation=None, use_bias=True, init_scale=1., init=False, ema=None, y_label=None):
+def dense_wn(x,
+             units,
+             name,
+             activation=None,
+             use_bias=True,
+             init_scale=1.,
+             init=False,
+             ema=None,
+             y_label=None):
     with tf.variable_scope(name):
         if y_label is None:
-            V = get_var_maybe_avg('V', ema, shape=[int(x.get_shape()[1]), units], dtype=tf.float32,
-                                  initializer=tf.random_normal_initializer(0, 0.05), trainable=True)
-            g = get_var_maybe_avg('g', ema, shape=[units], dtype=tf.float32,
-                                  initializer=tf.constant_initializer(1.), trainable=True)
-            b = get_var_maybe_avg('b', ema, shape=[units], dtype=tf.float32,
-                                  initializer=tf.constant_initializer(0.), trainable=use_bias)
+            V = get_var_maybe_avg('V',
+                                  ema,
+                                  shape=[int(x.get_shape()[1]), units],
+                                  dtype=tf.float32,
+                                  initializer=tf.random_normal_initializer(
+                                      0, 0.05),
+                                  trainable=True)
+            g = get_var_maybe_avg('g',
+                                  ema,
+                                  shape=[units],
+                                  dtype=tf.float32,
+                                  initializer=tf.constant_initializer(1.),
+                                  trainable=True)
+            b = get_var_maybe_avg('b',
+                                  ema,
+                                  shape=[units],
+                                  dtype=tf.float32,
+                                  initializer=tf.constant_initializer(0.),
+                                  trainable=use_bias)
 
             # use weight normalization (Salimans & Kingma, 2016)
             x = tf.matmul(x, V)
@@ -452,7 +642,10 @@ def dense_wn(x, units, name, activation=None, use_bias=True, init_scale=1., init
             if init:
                 m_init, v_init = tf.nn.moments(x, [0])
                 scale_init = init_scale / tf.sqrt(v_init + 1e-10)
-                with tf.control_dependencies([g.assign(g * scale_init), b.assign_add(-m_init * scale_init)]):
+                with tf.control_dependencies([
+                        g.assign(g * scale_init),
+                        b.assign_add(-m_init * scale_init)
+                ]):
                     x = tf.identity(x)
 
             if activation is not None:
@@ -460,11 +653,20 @@ def dense_wn(x, units, name, activation=None, use_bias=True, init_scale=1., init
             return x
         else:
             ndim = int(int_shape(x)[-1] / 2)
-            h = dense_wn(y_label, units=ndim, activation=tf.nn.leaky_relu, use_bias=True,
-                         init=init, name='label_h')
+            h = dense_wn(y_label,
+                         units=ndim,
+                         activation=tf.nn.leaky_relu,
+                         use_bias=True,
+                         init=init,
+                         name='label_h')
 
             o1 = tf.concat([h, x], axis=-1)
-            output = dense_wn(o1, units=units, activation=None, use_bias=True, init=init, name=name)
+            output = dense_wn(o1,
+                              units=units,
+                              activation=None,
+                              use_bias=True,
+                              init=init,
+                              name=name)
 
             if activation is not None:
                 output = activation(output)

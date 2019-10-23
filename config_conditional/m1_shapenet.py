@@ -45,6 +45,15 @@ gp_layer = None
 
 def build_model(x, y_label, init=False, sampling_mode=False):
     """
+    Args:
+        x: shape=(config.batch_size,) + config.obs_shape)
+           -> (batch_size, seq_len, 32, 32, channels=1)
+        y: shape=(bs, seq_len, 2)
+
+    This function is called with
+    > model = tf.make_template('model', config.build_model)
+    and creates all trainable variables
+
     If sampling_mode:
         return x_samples
     else:
@@ -53,6 +62,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
     """
     global nvp_layers
     global nvp_dense_layers
+    # Ensures that all nn_extra_nvp.*_wn layers have init=init
     with arg_scope([nn_extra_nvp.conv2d_wn, nn_extra_nvp.dense_wn], init=init):
         if len(nvp_layers) == 0:
             build_nvp_model()
@@ -119,13 +129,14 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                     for i in range(seq_len):
                         z_sample = gp_layer.sample(nr_samples=1)
                         z_samples.append(z_sample)
-                else:
+                else:  # Sampling mode from just prior (no context)
                     for i in range(seq_len):
                         z_sample = gp_layer.sample(nr_samples=1)
                         z_samples.append(z_sample)
+                        # Update each dimension of the latent space
                         gp_layer.update_distribution(z_vec[:, i, :])
-            else:
-                if n_context > 0:
+            else:  # Training mode
+                if n_context > 0:  # Some of sequence are context points
                     for i in range(n_context):
                         gp_layer.update_distribution(z_vec[:, i, :])
 
@@ -181,6 +192,7 @@ def build_nvp_model():
     num_res_blocks = 6
     for scale in range(num_scales - 1):
         nvp_layers.append(
+            # Checkerboard is binary mask for convolution
             nn_extra_nvp.CouplingLayerConv('checkerboard0',
                                            name='Checkerboard%d_1' % scale,
                                            nonlinearity=nonlinearity,
@@ -262,9 +274,10 @@ def build_nvp_model():
 
 
 def build_nvp_dense_model():
+    """No convolutional residual layers."""
     global nvp_dense_layers
 
-    for i in range(6):
+    for i in range(6):  # 6 dense layers
         mask = 'even' if i % 2 == 0 else 'odd'
         name = '%s_%s' % (mask, i)
         nvp_dense_layers.append(
