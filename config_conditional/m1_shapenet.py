@@ -75,6 +75,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             gp_layer = nn_extra_gauss.GaussianRecurrentLayer(
                 shape=(ndim, ), corr_init=corr_init)
 
+        # (batch_size, seq_len, 32, 32, channels=1)
         x_shape = nn_extra_nvp.int_shape(x)
         x_bs = tf.reshape(
             x, (x_shape[0] * x_shape[1], x_shape[2], x_shape[3], x_shape[4]))
@@ -98,7 +99,8 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         y, log_det_jac = nn_extra_nvp.logit_forward_and_jacobian(
             y, log_det_jac)
 
-        # construct forward pass
+        # TODO: Replace RealNVP layers with GLOW layers.
+        # construct forward pass through convolutional NVP layers.
         z = None
         for layer in nvp_layers:
             y, log_det_jac, z = layer.forward_and_jacobian(y,
@@ -107,6 +109,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                                                            y_label=y_label_bs)
 
         z = tf.concat([z, y], 3)
+        # Followed by 6 256-unit dense layers of alternating partitions/masks.
         for layer in nvp_dense_layers:
             z, log_det_jac, _ = layer.forward_and_jacobian(z,
                                                            log_det_jac,
@@ -114,7 +117,10 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                                                            y_label=y_label_bs)
 
         z_shape = nn_extra_nvp.int_shape(z)
+        # Reshape z to (batch_size, seq_len, -1)
+        # (last dimension is probably number of dimensions in the data, HxWxC)
         z_vec = tf.reshape(z, (x_shape[0], x_shape[1], -1))
+        # The log det jacobian z_i/x_i for every i in sequence of length n.
         log_det_jac = tf.reshape(log_det_jac, (x_shape[0], x_shape[1]))
 
         log_probs = []

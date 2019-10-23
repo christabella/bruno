@@ -63,6 +63,9 @@ class GaussianRecurrentLayer(object):
         self._state = State(0., 0.)
 
     def update_distribution(self, observation):
+        """Update MVN distribution of latent space recurrently with each
+        additional observation.
+        """
         mu, sigma = self.current_distribution
         i, x_sum = self._state
         x = observation
@@ -70,6 +73,7 @@ class GaussianRecurrentLayer(object):
         x_sum_out = x_sum + x_zm
         i += 1
         dd = self.cov / (self.var + self.cov * (i - 1.))
+        # Recurrent updates in equation 9 of BRUNO.
         mu_out = (1. - dd) * mu + observation * dd
         var_out = (1. - dd) * sigma + (self.var - self.cov) * dd
 

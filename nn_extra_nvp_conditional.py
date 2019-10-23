@@ -33,7 +33,12 @@ class Layer():
 
 
 class CouplingLayerConv(Layer):
-    """RealNVP Coupling Layer"""
+    """RealNVP Coupling Layer
+
+    Args:
+        mask_type (str): "checkerboard0/1", "channel0/1"
+        name (str): To share variable scope between forward and backward passes
+    """
     def __init__(self,
                  mask_type,
                  name='CouplingLayerConv',
@@ -214,6 +219,7 @@ class CouplingLayerConv(Layer):
             return y, sum_log_det_jacobians, z
 
     def backward(self, y, z, y_label=None):
+        # Reuse the same variable scope as the forward pass.
         with tf.variable_scope(self.name, reuse=True):
             ys = int_shape(y)
             b = self.get_mask(ys, self.mask_type)
