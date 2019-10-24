@@ -8,6 +8,14 @@ def int_shape(x):
 
 
 def logit_forward_and_jacobian(x, sum_log_det_jacobians):
+    """RealNVP paper:
+    The pixel values of an image typically lie in [0, 256]^D
+    after application of the recommended jittering procedure.
+    In order to reduce the impact of boundary effects,
+    we instead model the density of logit(α+(1−α)*x/256).
+
+    (Glow doesn't do any of this it seems.)
+    """
     alpha = 1e-5
     y = x * (1 - alpha) + alpha * 0.5
     jac = tf.reduce_sum(-tf.log(y) - tf.log(1 - y), [1, 2, 3])
@@ -17,6 +25,9 @@ def logit_forward_and_jacobian(x, sum_log_det_jacobians):
 
 
 def dequantization_forward_and_jacobian(x, sum_log_det_jacobians):
+    """BRUNO paper:
+    The values x + u ∈ [0, 256)^D are then rescaled to a [0, 1) interval
+    """
     x_shape = int_shape(x)
     y = x / 256.0
     sum_log_det_jacobians -= tf.log(
