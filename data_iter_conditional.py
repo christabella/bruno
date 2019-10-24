@@ -10,7 +10,12 @@ class ShapenetConditionalNPDataIterator():
     seq_len: how many different poses (y) to sample
     batch_size: [usually 4] 
     """
-    def __init__(self, seq_len, batch_size, set='train', rng=None):
+    def __init__(self,
+                 seq_len,
+                 batch_size,
+                 set='train',
+                 rng=None,
+                 should_dequantise=True):
         # Images, labels, and angles [N, 2].
         # Images: (len(images), image_height, image_width, image_channels)
         self.x, self.y, self.info = utils_conditional.load_shapenet(set)
@@ -28,6 +33,7 @@ class ShapenetConditionalNPDataIterator():
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.rng = rng
+        self.should_dequantise = should_dequantise
         self.set = set
 
         print(set, 'dataset size:', self.x.shape)
@@ -81,8 +87,8 @@ class ShapenetConditionalNPDataIterator():
                 for j in range(self.seq_len):
                     x_batch[i, j] = self.x[img_idxs[j]]
                     y_batch[i, j] = self.info[img_idxs[j]]
-
-            x_batch += noise_rng.uniform(size=x_batch.shape)
+            if self.should_dequantise:
+                x_batch += noise_rng.uniform(size=x_batch.shape)
             yield x_batch, y_batch
 
     def generate_each_digit(self,
@@ -120,5 +126,6 @@ class ShapenetConditionalNPDataIterator():
             # To make good use of modelling densities, the Real NVP has to
             # treat its inputs as instances of a continuous random variable.
             # Integer pixel values in x are dequantised by adding uniform noise
-            x_batch += noise_rng.uniform(size=x_batch.shape)
+            if self.should_dequantise:
+                x_batch += noise_rng.uniform(size=x_batch.shape)
             yield c, x_batch, y_batch

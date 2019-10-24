@@ -17,9 +17,17 @@ nonlinearity = tf.nn.elu
 weight_norm = True
 
 train_data_iter = data_iter_conditional.ShapenetConditionalNPDataIterator(
-    seq_len=seq_len, batch_size=batch_size, set='train', rng=rng)
+    seq_len=seq_len,
+    batch_size=batch_size,
+    set='train',
+    rng=rng,
+    should_dequantise=False)
 test_data_iter = data_iter_conditional.ShapenetConditionalNPDataIterator(
-    seq_len=seq_len, batch_size=batch_size, set='test', rng=rng_test)
+    seq_len=seq_len,
+    batch_size=batch_size,
+    set='test',
+    rng=rng_test,
+    should_dequantise=False)
 
 obs_shape = train_data_iter.get_observation_size(
 )  # (seq_len, 32, 32, channels=1)
@@ -38,7 +46,7 @@ gp_grad_schedule = {0: 0., 500: 0.5, 1000: 1.}
 max_iter = 200000
 save_every = 5000
 
-nvp_layers = []
+glow_layers = []
 nvp_dense_layers = []
 gp_layer = None
 
@@ -60,15 +68,10 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         return log_probs, log_probs, log_probs
 
     """
-    global nvp_layers
-    global nvp_dense_layers
     # Ensures that all nn_extra_nvp.*_wn layers have init=init
     with arg_scope([nn_extra_nvp.conv2d_wn, nn_extra_nvp.dense_wn], init=init):
-        if len(nvp_layers) == 0:
-            build_nvp_model()
-
-        if len(nvp_dense_layers) == 0:
-            build_nvp_dense_model()
+        if len(glow_layers) == 0:
+            build_glow_model()
 
         global gp_layer
         if gp_layer is None:
@@ -93,16 +96,14 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             name='labels_layer')
 
         log_det_jac = tf.zeros(x_bs_shape[0])
-
-        y, log_det_jac = nn_extra_nvp.dequantization_forward_and_jacobian(
-            x_bs, log_det_jac)
-        y, log_det_jac = nn_extra_nvp.logit_forward_and_jacobian(
-            y, log_det_jac)
+        # GLOW doesn't do any pretransformation from jittering
+        # but maybe we might still need to do the scaling.
+        y = x_bs
 
         # TODO: Replace RealNVP layers with GLOW layers.
         # construct forward pass through convolutional NVP layers.
         z = None
-        for layer in nvp_layers:
+        for layer in glow_layers:
             y, log_det_jac, z = layer.forward_and_jacobian(y,
                                                            log_det_jac,
                                                            z,
@@ -190,9 +191,10 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         return log_probs, log_probs, log_probs
 
 
-def build_nvp_model():
+def build_glow_model():
+
     # Appends to global nvp_layers.
-    global nvp_layers
+    global glow_layers
     num_scales = 3
     num_filters = 64
     num_res_blocks = 6
