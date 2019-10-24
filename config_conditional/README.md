@@ -34,6 +34,8 @@ CUDA_VISIBLE_DEVICES=0,1 python3 -m config_conditional.train  --config_name m1_s
 
 ```
 CUDA_VISIBLE_DEVICES=0 python3 -m config_conditional.test_samples  --config_name m1_shapenet --seq_len 13 --n_context 1
+
+srun -t 01:00:00 --gres=gpu:1 --mem=8G python3 -m config_conditional.test_samples  --config_name m1_shapenet --seq_len 13 --n_context 1
 ```
 
 **Generating samples from the prior**
