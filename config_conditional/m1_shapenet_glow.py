@@ -7,6 +7,10 @@ import nn_extra_gauss
 import nn_extra_nvp_conditional as nn_extra_nvp
 from config_conditional import defaults
 
+# GLOW
+from glow import flow_layers as fl
+from glow import nets
+
 batch_size = 4
 rng = np.random.RandomState(42)
 rng_test = np.random.RandomState(317070)
