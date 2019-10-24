@@ -170,13 +170,9 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             z_samples = tf.reshape(z_samples,
                                    z_shape)  # (n_samples*seq_len, z_img_shape)
 
-            for layer in reversed(nvp_dense_layers):
-                z_samples, _ = layer.backward(z_samples,
-                                              None,
-                                              y_label=y_label_bs)
-
             x_samples = None
-            for layer in reversed(nvp_layers):
+            # TODO do backward flow on glow model
+            for layer in reversed(glow_layers):
                 x_samples, z_samples = layer.backward(x_samples,
                                                       z_samples,
                                                       y_label=y_label_bs)
@@ -196,93 +192,16 @@ def build_model(x, y_label, init=False, sampling_mode=False):
 
 
 def build_glow_model():
-
     # Appends to global nvp_layers.
     global glow_layers
-    num_scales = 3
-    num_filters = 64
-    num_res_blocks = 6
-    for scale in range(num_scales - 1):
-        nvp_layers.append(
-            # Checkerboard is binary mask for convolution
-            nn_extra_nvp.CouplingLayerConv('checkerboard0',
-                                           name='Checkerboard%d_1' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(
-            nn_extra_nvp.CouplingLayerConv('checkerboard1',
-                                           name='Checkerboard%d_2' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(
-            nn_extra_nvp.CouplingLayerConv('checkerboard0',
-                                           name='Checkerboard%d_3' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(nn_extra_nvp.SqueezingLayer(name='Squeeze%d' %
-                                                      scale))
-        nvp_layers.append(
-            nn_extra_nvp.CouplingLayerConv('channel0',
-                                           name='Channel%d_1' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(
-            nn_extra_nvp.CouplingLayerConv('channel1',
-                                           name='Channel%d_2' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(
-            nn_extra_nvp.CouplingLayerConv('channel0',
-                                           name='Channel%d_3' % scale,
-                                           nonlinearity=nonlinearity,
-                                           weight_norm=weight_norm,
-                                           num_filters=num_filters,
-                                           num_res_blocks=num_res_blocks))
-        nvp_layers.append(
-            nn_extra_nvp.FactorOutLayer(scale, name='FactorOut%d' % scale))
-
-    # final layer
-    scale = num_scales - 1
-    nvp_layers.append(
-        nn_extra_nvp.CouplingLayerConv('checkerboard0',
-                                       name='Checkerboard%d_1' % scale,
-                                       nonlinearity=nonlinearity,
-                                       weight_norm=weight_norm,
-                                       num_filters=num_filters,
-                                       num_res_blocks=num_res_blocks))
-    nvp_layers.append(
-        nn_extra_nvp.CouplingLayerConv('checkerboard1',
-                                       name='Checkerboard%d_2' % scale,
-                                       nonlinearity=nonlinearity,
-                                       weight_norm=weight_norm,
-                                       num_filters=num_filters,
-                                       num_res_blocks=num_res_blocks))
-    nvp_layers.append(
-        nn_extra_nvp.CouplingLayerConv('checkerboard0',
-                                       name='Checkerboard%d_3' % scale,
-                                       nonlinearity=nonlinearity,
-                                       weight_norm=weight_norm,
-                                       num_filters=num_filters,
-                                       num_res_blocks=num_res_blocks))
-    nvp_layers.append(
-        nn_extra_nvp.CouplingLayerConv('checkerboard1',
-                                       name='Checkerboard%d_4' % scale,
-                                       nonlinearity=nonlinearity,
-                                       weight_norm=weight_norm,
-                                       num_filters=num_filters,
-                                       num_res_blocks=num_res_blocks))
-    nvp_layers.append(
-        nn_extra_nvp.FactorOutLayer(scale, name='FactorOut%d' % scale))
+    layers, actnorm_layers = nets.create_simple_flow(
+        num_steps=32,  # same as K
+        num_scales=4,  # same as L parameter
+        template_fn=nets.OpenAITemplate(width=512))
+    model = fl.ChainLayer(layers)
+    # images_ph = tf.placeholder(tf.float32, [16, 64, 64, 3])
+    # flow = fl.InputLayer(images_ph)
+    glow_layers = model
 
 
 def build_nvp_dense_model():

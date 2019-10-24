@@ -7,15 +7,6 @@ def int_shape(x):
     return list(map(int, x.get_shape()))
 
 
-def logit_forward_and_jacobian(x, sum_log_det_jacobians):
-    alpha = 1e-5
-    y = x * (1 - alpha) + alpha * 0.5
-    jac = tf.reduce_sum(-tf.log(y) - tf.log(1 - y), [1, 2, 3])
-    y = tf.log(y) - tf.log(1. - y)
-    sum_log_det_jacobians += jac
-    return y, sum_log_det_jacobians
-
-
 def dequantization_forward_and_jacobian(x, sum_log_det_jacobians):
     x_shape = int_shape(x)
     y = x / 256.0
