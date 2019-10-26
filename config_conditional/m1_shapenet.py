@@ -27,7 +27,7 @@ label_shape = train_data_iter.get_label_size()  # (seq_len, 2)
 print('obs shape', obs_shape)
 print('label shape', label_shape)
 
-ndim = np.prod(obs_shape[1:])
+ndim = np.prod(obs_shape[1:])  # H * W * C
 corr_init = np.ones((ndim, ), dtype='float32') * 0.1
 
 optimizer = 'rmsprop'
@@ -77,6 +77,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
 
         # (batch_size, seq_len, 32, 32, channels=1)
         x_shape = nn_extra_nvp.int_shape(x)
+        # Reshape into (batch_size * seq_len, 32, 32, channels=1)
         x_bs = tf.reshape(
             x, (x_shape[0] * x_shape[1], x_shape[2], x_shape[3], x_shape[4]))
         x_bs_shape = nn_extra_nvp.int_shape(x_bs)
@@ -92,10 +93,12 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             use_bias=True,
             name='labels_layer')
 
-        log_det_jac = tf.zeros(x_bs_shape[0])
+        log_det_jac = tf.zeros(x_bs_shape[0])  # seq_len * batch size
+        # 16 * 4 = (64, )
 
         y, log_det_jac = nn_extra_nvp.dequantization_forward_and_jacobian(
             x_bs, log_det_jac)
+        # y: (64, 32, 32, 1)
         y, log_det_jac = nn_extra_nvp.logit_forward_and_jacobian(
             y, log_det_jac)
 

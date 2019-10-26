@@ -50,15 +50,14 @@ gp_grad_schedule = {0: 0., 500: 0.5, 1000: 1.}
 max_iter = 200000
 save_every = 5000
 
-glow_layers = []
-nvp_dense_layers = []
+glow_model = None
 gp_layer = None
 
 
 def build_model(x, y_label, init=False, sampling_mode=False):
     """
     Args:
-        x: shape=(config.batch_size,) + config.obs_shape)
+        x: float32 placeholder with shape=(config.batch_size,) + config.obs_shape)
            -> (batch_size, seq_len, 32, 32, channels=1)
         y: shape=(bs, seq_len, 2)
 
@@ -74,7 +73,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
     """
     # Ensures that all nn_extra_nvp.*_wn layers have init=init
     with arg_scope([nn_extra_nvp.conv2d_wn, nn_extra_nvp.dense_wn], init=init):
-        if len(glow_layers) == 0:
+        if glow_model is None:
             build_glow_model()
 
         global gp_layer
@@ -102,29 +101,29 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         log_det_jac = tf.zeros(x_bs_shape[0])
         # GLOW doesn't do any pretransformation from jittering
         # but maybe we might still need to do the scaling.
-        y = x_bs
+        x_bs, log_det_jac = nn_extra_nvp.dequantization_forward_and_jacobian(
+            x_bs, log_det_jac)
 
         # TODO: Replace RealNVP layers with GLOW layers.
         # construct forward pass through convolutional NVP layers.
         z = None
-        for layer in glow_layers:
-            y, log_det_jac, z = layer.forward_and_jacobian(y,
-                                                           log_det_jac,
-                                                           z,
-                                                           y_label=y_label_bs)
-
-        z = tf.concat([z, y], 3)
-        # Followed by 6 256-unit dense layers of alternating partitions/masks.
-        for layer in nvp_dense_layers:
-            z, log_det_jac, _ = layer.forward_and_jacobian(z,
-                                                           log_det_jac,
-                                                           None,
-                                                           y_label=y_label_bs)
-
+        # This is not having a sequence length... wait do we individually pass each image through its own normalizing flow?
+        # Now we have batch size * seq len images in x_bs
+        input_flow = fl.InputLayer(x_bs)
+        # forward flow
+        output_flow = glow_model(input_flow, forward=True)
+        # backward flow
+        # reconstruction = glow_model(output_flow, forward=False)
+        # flow is a tuple of three tensors
+        x, log_det_jac, z = output_flow
+        #  x=[64, 2, 2, 16]	z=[64, 2, 2, 240]	logdet=[64]
+        # z is None...
+        z = tf.concat([z, x], 3)  # Join the split channels back
+        # [64, 2, 2, 256]
         z_shape = nn_extra_nvp.int_shape(z)
         # Reshape z to (batch_size, seq_len, -1)
         # (last dimension is probably number of dimensions in the data, HxWxC)
-        z_vec = tf.reshape(z, (x_shape[0], x_shape[1], -1))
+        z_vec = tf.reshape(z, (x_shape[0], x_shape[1], -1))  # 4, 16, 1024
         # The log det jacobian z_i/x_i for every i in sequence of length n.
         log_det_jac = tf.reshape(log_det_jac, (x_shape[0], x_shape[1]))
 
@@ -172,13 +171,13 @@ def build_model(x, y_label, init=False, sampling_mode=False):
 
             x_samples = None
             # TODO do backward flow on glow model
-            for layer in reversed(glow_layers):
-                x_samples, z_samples = layer.backward(x_samples,
-                                                      z_samples,
-                                                      y_label=y_label_bs)
+            # for layer in reversed(glow_layers):
+            #     x_samples, z_samples = layer.backward(x_samples,
+            #                                           z_samples,
+            #                                           y_label=y_label_bs)
 
             # inverse logit
-            x_samples = 1. / (1 + tf.exp(-x_samples))
+            # x_samples = 1. / (1 + tf.exp(-x_samples))
             x_samples = tf.reshape(x_samples,
                                    (z_samples_shape[0], z_samples_shape[1],
                                     x_shape[2], x_shape[3], x_shape[4]))
@@ -187,36 +186,22 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         # Reshape from (N, A, B, C) to (A, N, B, C)
         # Kind of "zipping" the log probs
         log_probs = tf.stack(log_probs, axis=1)
-
+        # log probs: (4, 15)
         return log_probs, log_probs, log_probs
 
 
 def build_glow_model():
     # Appends to global nvp_layers.
-    global glow_layers
+    global glow_model
     layers, actnorm_layers = nets.create_simple_flow(
         num_steps=32,  # same as K
         num_scales=4,  # same as L parameter
-        template_fn=nets.OpenAITemplate(width=512))
+        # template_fn=nets.OpenAITemplate(width=512))
+        template_fn=nets.OpenAITemplate(width=8))
     model = fl.ChainLayer(layers)
-    # images_ph = tf.placeholder(tf.float32, [16, 64, 64, 3])
-    # flow = fl.InputLayer(images_ph)
-    glow_layers = model
-
-
-def build_nvp_dense_model():
-    """No convolutional residual layers."""
-    global nvp_dense_layers
-
-    for i in range(6):  # 6 dense layers
-        mask = 'even' if i % 2 == 0 else 'odd'
-        name = '%s_%s' % (mask, i)
-        nvp_dense_layers.append(
-            nn_extra_nvp.CouplingLayerDense(mask,
-                                            name=name,
-                                            nonlinearity=nonlinearity,
-                                            n_units=256,
-                                            weight_norm=weight_norm))
+    # x_bs = tf.placeholder(tf.float32, [16, 64, 64, 3])
+    # flow = fl.InputLayer(x_bs)
+    glow_model = model
 
 
 def loss(log_probs):
