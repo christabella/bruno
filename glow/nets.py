@@ -14,121 +14,6 @@ K = tf.keras.backend
 keras = tf.keras
 
 
-def simple_resnet_template_fn(name: str,
-                              activation_fn=tf.nn.relu,
-                              units_factor: int = 2,
-                              num_blocks: int = 1,
-                              units_width: int = 0,
-                              selu_reg_scale: float = 0.0,
-                              skip_connection: bool = True):
-    """
-    Creates simple Resnet shallow network. Note that this function will return a
-    tensorflow template.
-    Args:
-        name: a scope name of the network
-        activation_fn: activation function used after each conv layer
-        units_factor: a base scale of the numbers of units in the resnet block.
-            The number of units is computed as units_factor * num_channels.
-        num_blocks: num resnet blocks
-        units_width: number of units in the resnet. if 0 then units_factor
-            is used to estimate num_units in the conv2d
-        selu_reg_scale: conv weights selu like regularization
-        skip_connection: whether to use skip connections or not
-
-    Returns:
-        a template function
-    """
-
-    if selu_reg_scale == 0:
-        reg_fn = lambda: None
-    else:
-        reg_fn = lambda: tf_ops.conv2d_selu_regularizer(selu_reg_scale)
-
-    def _shift_and_log_scale_fn(x: tf.Tensor):
-        shape = K.int_shape(x)
-        num_channels = shape[3]
-        num_units = num_channels * units_factor
-        if units_width != 0:
-            num_units = units_width
-
-        h = x
-        for u in range(num_blocks):
-            with tf.variable_scope(f"ResnetBlock{u}"):
-                h_input = h
-                # nn definition
-                h = tf_layers.conv2d(inputs=h_input,
-                                     num_outputs=num_units,
-                                     kernel_size=3,
-                                     activation_fn=activation_fn,
-                                     weights_regularizer=reg_fn())
-                h = tf_layers.conv2d(
-                    inputs=h,
-                    num_outputs=num_units,
-                    kernel_size=1,
-                    activation_fn=None,
-                )
-                if skip_connection:
-
-                    if num_units != K.int_shape(h_input)[3]:
-                        h_input = tf_layers.conv2d(
-                            inputs=h_input,
-                            num_outputs=num_units,
-                            kernel_size=1,
-                            activation_fn=activation_fn,
-                            weights_regularizer=reg_fn())
-
-                    h = h + h_input
-
-                h = activation_fn(h)
-
-        # create shift and log_scale with (almost) zero initialization
-        shift_log_scale = tf_layers.conv2d(
-            inputs=h,
-            num_outputs=2 * num_channels,
-            weights_initializer=tf.variance_scaling_initializer(scale=0.001),
-            kernel_size=3,
-            activation_fn=None,
-            normalizer_fn=None,
-        )
-        shift = shift_log_scale[:, :, :, :num_channels]
-        log_scale = shift_log_scale[:, :, :, num_channels:]
-        log_scale = tf.clip_by_value(log_scale, -15.0, 15.0)
-        return shift, log_scale
-
-    return template_ops.make_template(name, _shift_and_log_scale_fn)
-
-
-class TemplateFn:
-    def __init__(self, params: Dict[str, Any],
-                 template_fn: Callable[[str], Any]):
-        self._params = params
-        self._template_fn = template_fn
-
-    def create_template_fn(self, name: str):
-        return self._template_fn(name=name, **self._params)
-
-
-class ResentTemplate(TemplateFn):
-    def __init__(
-            self,
-            activation_fn=tf.nn.relu,
-            units_factor: int = 2,
-            num_blocks: int = 1,
-            units_width: int = 0,
-            skip_connection: bool = True,
-            selu_reg_scale: float = 0.001,
-    ) -> None:
-        params = {
-            "activation_fn": activation_fn,
-            "units_factor": units_factor,
-            "num_blocks": num_blocks,
-            "units_width": units_width,
-            "skip_connection": skip_connection,
-            "selu_reg_scale": selu_reg_scale,
-        }
-        super().__init__(params=params, template_fn=simple_resnet_template_fn)
-
-
 class OpenAITemplate(NamedTuple):
     """
     A shallow neural network used by GLOW paper:
@@ -222,13 +107,13 @@ def initialize_actnorms(
 def create_simple_flow(num_steps: int = 1,
                        num_scales: int = 3,
                        num_bits: int = 5,
-                       template_fn: Any = ResentTemplate()
+                       template_fn: Any = OpenAITemplate()
                        ) -> Tuple[List[fl.FlowLayer], List[fl.ActnormLayer]]:
     """Create Glow model. This implementation may slightly differ from the
     official one. For example the last layer here is the fl.FactorOutLayer
 
     Args:
-        num_steps: number of steps per single scale, a K parameter from the paper
+        num_steps: number of steps per single scale; K parameter from the paper
         num_scales: number of scales, a L parameter from the paper. Each scale
             reduces the tensor spatial dimension by 2.
         num_bits: input image quantization
