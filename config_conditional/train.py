@@ -112,28 +112,29 @@ for i in range(args.nr_gpu):
         with tf.variable_scope('gpu_%d' % i):
             with tf.variable_scope('train'):
                 log_probs = model(xs[i], ys[i])[0]
+                # log probs is Tensor("gpu_0/train/model/stack:0", shape=(4, 15), dtype=float32, device=/device:GPU:0)
                 train_losses.append(config.loss(log_probs))
                 grads.append(tf.gradients(train_losses[i], all_params))
 
 # add gradients together and get training updates
 tf_lr = tf.placeholder(tf.float32, shape=[])
-tf_student_grad_scale = tf.placeholder(tf.float32, shape=[])
+tf_gp_grad_scale = tf.placeholder(tf.float32, shape=[])
 with tf.device('/gpu:0'):
-    for i in range(1, args.nr_gpu):
+    # Losses and grads of first gpu is the average of all of them? ?_?
+    for i in range(1, args.nr_gpu):  # Skip if only 1 GPU
         train_losses[0] += train_losses[i]
         for j in range(len(grads[0])):
             grads[0][j] += grads[i][j]
-
     # average over gpus
     train_losses[0] /= args.nr_gpu
     for j in range(len(grads[0])):
         grads[0][j] /= args.nr_gpu
 
-    # scale gradients of student_params
-    student_params = ['prior_nu', 'prior_mean', 'prior_var', 'prior_corr']
+    # scale gradients of gp_params
+    gp_params = ['prior_nu', 'prior_mean', 'prior_var', 'prior_corr']
     for j in range(len(grads[0])):
-        if any(name in all_params[j].name for name in student_params):
-            grads[0][j] *= tf_student_grad_scale
+        if any(name in all_params[j].name for name in gp_params):
+            grads[0][j] *= tf_gp_grad_scale
 
     # training op
     grads_and_vars = zip(grads[0], all_params)
@@ -168,7 +169,7 @@ saver = tf.train.Saver()
 print('\n Start training')
 train_data_iter = config.train_data_iter
 lr = config.learning_rate
-student_grad_scale = config.scale_student_grad
+gp_grad_scale = config.scale_gp_grad
 batch_idxs = range(0, config.max_iter)
 print_every = 100
 train_iter_losses = []
@@ -196,12 +197,12 @@ with tf.Session() as sess:
         elif hasattr(config, 'lr_decay'):
             lr *= config.lr_decay
 
-        if hasattr(config, 'student_grad_schedule'
-                   ) and iteration in config.student_grad_schedule:
-            student_grad_scale = np.float32(
-                config.student_grad_schedule[iteration])
-            print('setting student grad scale to %.7f' %
-                  config.student_grad_schedule[iteration])
+        if hasattr(
+                config,
+                'gp_grad_schedule') and iteration in config.gp_grad_schedule:
+            gp_grad_scale = np.float32(config.gp_grad_schedule[iteration])
+            print('setting gp grad scale to %.7f' %
+                  config.gp_grad_schedule[iteration])
 
         if args.resume and iteration < last_iteration:
             if iteration % (print_every * 10) == 0:
@@ -217,7 +218,7 @@ with tf.Session() as sess:
         else:
             xfs = np.split(x_batch, args.nr_gpu)
             yfs = np.split(y_batch, args.nr_gpu)
-            feed_dict = {tf_lr: lr, tf_student_grad_scale: student_grad_scale}
+            feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
             feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
             feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
             l, _ = sess.run([train_loss, train_step], feed_dict)
@@ -233,7 +234,7 @@ with tf.Session() as sess:
                 print('%d/%d train_loss=%6.8f bits/value=%.3f' %
                       (iteration + 1, config.max_iter, avg_train_loss,
                        avg_train_loss / config.ndim / np.log(2.)))
-                corr = config.student_layer.corr.eval().flatten()
+                corr = config.gp_layer.corr.eval().flatten()
 
             if (iteration + 1) % config.save_every == 0:
                 current_time = time.time()
@@ -257,7 +258,7 @@ with tf.Session() as sess:
                             'losses_eval_train': losses_eval_train
                         }, f)
 
-                corr = config.student_layer.corr.eval().flatten()
+                corr = config.gp_layer.corr.eval().flatten()
                 print('0.01', np.sum(corr > 0.01))
                 print('0.1', np.sum(corr > 0.1))
                 print('0.2', np.sum(corr > 0.2))
@@ -265,11 +266,11 @@ with tf.Session() as sess:
                 print('0.5', np.sum(corr > 0.5))
                 print('0.7', np.sum(corr > 0.7))
                 print('corr min-max:', np.min(corr), np.max(corr))
-                var = config.student_layer.var.eval().flatten()
+                var = config.gp_layer.var.eval().flatten()
                 print('var min-max:', np.min(var), np.max(var))
 
-                if hasattr(config.student_layer, 'nu'):
-                    nu = config.student_layer.nu.eval().flatten()
+                if hasattr(config.gp_layer, 'nu'):
+                    nu = config.gp_layer.nu.eval().flatten()
                     print('nu median-min-max:', np.median(nu), np.min(nu),
                           np.max(nu))
 
