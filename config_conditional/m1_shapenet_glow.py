@@ -109,13 +109,13 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         z = None
         # This is not having a sequence length... wait do we individually pass each image through its own normalizing flow?
         # Now we have batch size * seq len images in x_bs
-        input_flow = fl.InputLayer(x_bs)
+        input_flow = fl.InputLayer(x_bs, y_label_bs)
         # forward flow
         output_flow = glow_model(input_flow, forward=True)
         # backward flow
         # reconstruction = glow_model(output_flow, forward=False)
         # flow is a tuple of three tensors
-        x, log_det_jac, z = output_flow
+        x, log_det_jac, z, y_label = output_flow
         #  x=[64, 2, 2, 16]	z=[64, 2, 2, 240]	logdet=[64]
         # z is None...
         z = tf.concat([z, x], 3)  # Join the split channels back

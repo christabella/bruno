@@ -9,12 +9,13 @@ from typing import Optional, Tuple, List, Callable
 import numpy as np
 import scipy.linalg as salg
 import tensorflow as tf
-from tensorflow.contrib.framework.python.ops import add_arg_scope
+from tensorflow.contrib.framework.python.ops import add_arg_scope  # Decorates a function with args so it can be used within an arg_scope.
 
 K = tf.keras.backend
 keras = tf.keras
-# x, logdet, z
-FlowData = Tuple[tf.Tensor, tf.Tensor, Optional[tf.Tensor]]
+# x, logdet, z, y_label
+FlowData = Tuple[tf.Tensor, tf.Tensor, Optional[tf.Tensor], Optional[tf.
+                                                                     Tensor]]
 
 
 def print_shapes(name: str, forward: bool, flow: FlowData) -> None:
@@ -35,22 +36,24 @@ def print_shapes(name: str, forward: bool, flow: FlowData) -> None:
         z_shape = f"{flow[2].shape.as_list()}"
     print(f"{name[:40]:40}: "
           f"{x_name}={flow[0].shape.as_list()}\tz={z_shape}\t"
-          f"logdet={flow[1].shape.as_list()}")
+          f"logdet={flow[1].shape.as_list()}\t"
+          f"y_label={flow[3].shape.as_list()}")
 
 
 def identity_flow(flow: FlowData, forward: bool) -> FlowData:
     """Name flow data nodes. Returns flow passed through the
     tf.identity function."""
     with tf.name_scope("outputs"):
-        x, logdet, z = flow
+        x, logdet, z, y_label = flow
         if forward:
             x = tf.identity(x, name="x")
         else:
             x = tf.identity(x, name="y")
         logdet = tf.identity(logdet, name="lodget")
+        y_label = tf.identity(y_label, name="y_label")
         if z is not None:
             z = tf.identity(z, name="z")
-    return x, logdet, z
+    return x, logdet, z, y_label
 
 
 class FlowLayer:
@@ -82,6 +85,7 @@ class FlowLayer:
                 x: tf.Tensor,
                 logdet: tf.Tensor,
                 z: Optional[tf.Tensor],
+                y_label: Optional[tf.Tensor],
                 is_training: bool = True) -> FlowData:
         raise NotImplementedError()
 
@@ -89,6 +93,7 @@ class FlowLayer:
                  y: tf.Tensor,
                  logdet: tf.Tensor,
                  z: Optional[tf.Tensor],
+                 y_label: Optional[tf.Tensor],
                  is_training: bool = True) -> FlowData:
         raise NotImplementedError()
 
@@ -135,7 +140,7 @@ class FlowLayer:
         return outputs
 
 
-def InputLayer(x: tf.Tensor) -> FlowData:
+def InputLayer(x: tf.Tensor, y_label: tf.Tensor = None) -> FlowData:
     """
     Initialize input flow x is an image
     Args:
@@ -147,19 +152,26 @@ def InputLayer(x: tf.Tensor) -> FlowData:
         logdet: a zero tensor of shape [batch_size]
         z: a None value. This value is later initialized by FactorOutLayer
     """
-    input_shape = K.int_shape(x)
+    input_shape = K.int_shape(x)  # B x H x W x C
+    y_label_shape = K.int_shape(y_label)  # B x Y
     assert len(input_shape) == 2 or len(input_shape) == 4
     batch_size = input_shape[0]
     assert batch_size is not None
+    assert batch_size == y_label_shape[0]
     logdet = tf.zeros([batch_size])
     z = None
-    return x, logdet, z
+    return x, logdet, z, y_label
 
 
 class LogitifyImage(FlowLayer):
     """Apply Tapani Raiko's dequantization and express
     image in terms of logits"""
-    def forward(self, x, logdet, z, is_training: bool = True):
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True):
         """x should be in range [0, 1]"""
         # corrupt data (Tapani Raiko's dequantization)
         xs = K.int_shape(x)
@@ -175,13 +187,18 @@ class LogitifyImage(FlowLayer):
         new_y = tf.log(y) - tf.log(1 - y)
         dlogdet = tf.reduce_sum(-tf.log(y) - tf.log(1 - y), [1, 2, 3])
 
-        return new_y, logdet + dlogdet, z
+        return new_y, logdet + dlogdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True):
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True):
         denominator = 1 + tf.exp(-y)
         x = 1 / denominator
         dlogdet = tf.reduce_sum(-2 * tf.log(denominator) - y, [1, 2, 3])
-        return x, logdet + dlogdet, z
+        return x, logdet + dlogdet, z, y_label
 
 
 class QuantizeImage(FlowLayer):
@@ -202,7 +219,12 @@ class QuantizeImage(FlowLayer):
         super().__init__(**kwargs)
         self._num_bits = num_bits
 
-    def forward(self, x, logdet, z, is_training: bool = True):
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True):
         """x must be in range [0, 1].
         The output image is in range [-0.5, 0.5]"""
         xs = K.int_shape(x)
@@ -215,11 +237,16 @@ class QuantizeImage(FlowLayer):
             x = x / num_bins
         x = x - 0.5
         y = x + tf.random_uniform(tf.shape(x), 0, 1. / num_bins)
-        return y, logdet, z
+        return y, logdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True):
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True):
         x = y + .5
-        return x, logdet, z
+        return x, logdet, z, y_label
 
     def to_uint8(self, y: tf.Tensor) -> tf.Tensor:
         """
@@ -250,7 +277,12 @@ class SqueezingLayer(FlowLayer):
         * if z is not None it will be squeezed in the same manner
         * this is volume preserving operation, hence logdet is unchanged
     """
-    def forward(self, x, logdet, z, is_training: bool = True):
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True):
         xs = K.int_shape(x)
         assert len(xs) == 4
         assert xs[1] % 2 == 0 and xs[2] % 2 == 0
@@ -258,9 +290,14 @@ class SqueezingLayer(FlowLayer):
         if z is not None:
             z = tf.space_to_depth(z, 2)
 
-        return y, logdet, z
+        return y, logdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True):
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True):
         ys = K.int_shape(y)
         assert len(ys) == 4
         assert ys[3] % 4 == 0
@@ -268,7 +305,7 @@ class SqueezingLayer(FlowLayer):
         if z is not None:
             z = tf.depth_to_space(z, 2)
 
-        return x, logdet, z
+        return x, logdet, z, y_label
 
 
 class FactorOutLayer(FlowLayer):
@@ -286,7 +323,12 @@ class FactorOutLayer(FlowLayer):
         super().__init__(name=name, **kwargs)
         self.split_size = None
 
-    def forward(self, x, logdet, z, is_training: bool = True):
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True):
         xs = K.int_shape(x)
         assert len(xs) == 4
         split = xs[3] // 2
@@ -300,9 +342,14 @@ class FactorOutLayer(FlowLayer):
         else:
             z = new_z
 
-        return x, logdet, z
+        return x, logdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True):
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True):
         assert self.split_size is not None
 
         if y is None:
@@ -319,7 +366,7 @@ class FactorOutLayer(FlowLayer):
             x = tf.concat([new_y, y], axis=3)
         else:
             x = new_y
-        return x, logdet, z
+        return x, logdet, z, y_label
 
 
 class ChainLayer(FlowLayer):
@@ -335,14 +382,24 @@ class ChainLayer(FlowLayer):
         super().__init__(name=name, **kwargs)
         self._layers = layers
 
-    def forward(self, x, logdet, z, is_training: bool = True):
-        flow = x, logdet, z
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True):
+        flow = x, logdet, z, y_label
         for layer in self._layers:
             flow = layer(flow, forward=True, is_training=is_training)
         return flow
 
-    def backward(self, y, logdet, z, is_training: bool = True):
-        flow = y, logdet, z
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True):
+        flow = y, logdet, z, y_label
         for layer in reversed(self._layers):
             flow = layer(flow, forward=False, is_training=is_training)
         return flow
@@ -471,17 +528,27 @@ class ActnormBiasLayer(_ActnormBaseLayer):
                                        tf.float32,
                                        initializer=tf.zeros_initializer())
 
-    def forward(self, x, logdet, z, is_training: bool = True) -> FlowData:
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True) -> FlowData:
         if self._input_shape is None:
             self._input_shape = K.int_shape(x)
             self.build()
 
         y = x + self._bias_t
-        return y, logdet, z
+        return y, logdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True) -> FlowData:
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True) -> FlowData:
         x = y - self._bias_t
-        return x, logdet, z
+        return x, logdet, z, y_label
 
 
 class ActnormScaleLayer(_ActnormBaseLayer):
@@ -550,7 +617,12 @@ class ActnormScaleLayer(_ActnormBaseLayer):
             initializer=tf.zeros_initializer(),
         )
 
-    def forward(self, x, logdet, z, is_training: bool = True) -> FlowData:
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True) -> FlowData:
         if self._input_shape is None:
             self._input_shape = K.int_shape(x)
             self.build()
@@ -566,14 +638,15 @@ class ActnormScaleLayer(_ActnormBaseLayer):
         dlogdet = logdet_factor * tf.reduce_sum(self._log_scale_t)
         self._current_forward_logdet = dlogdet
 
-        return y, logdet + dlogdet, z
+        return y, logdet + dlogdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True) -> FlowData:
+    def backward(self, y, logdet, z, y_label,
+                 is_training: bool = True) -> FlowData:
 
         x = y * tf.exp(-self._log_scale_t)
         self._current_backward_logdet = -self._current_forward_logdet
         dlogdet = self._current_backward_logdet
-        return x, logdet + dlogdet, z
+        return x, logdet + dlogdet, z, y_label
 
 
 class ActnormLayer(FlowLayer):
@@ -607,13 +680,23 @@ class ActnormLayer(FlowLayer):
             update_ops = tf.group([bias_update_op, scale_update_op])
         return update_ops
 
-    def forward(self, x, logdet, z, is_training: bool = True) -> FlowData:
-        return self._chain((x, logdet, z),
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True) -> FlowData:
+        return self._chain((x, logdet, z, y_label),
                            forward=True,
                            is_training=is_training)
 
-    def backward(self, y, logdet, z, is_training: bool = True) -> FlowData:
-        return self._chain((y, logdet, z),
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True) -> FlowData:
+        return self._chain((y, logdet, z, y_label),
                            forward=False,
                            is_training=is_training)
 
@@ -648,7 +731,7 @@ class InvertibleConv1x1Layer(FlowLayer):
     def build(self):
         if self._input_shape is None:
             return
-        assert len(self._input_shape) == 4
+        assert len(self._input_shape) == 4  # B x H x W x C
         dtype = "float64"
         shape = self._input_shape
         num_channels = shape[3]
@@ -712,24 +795,34 @@ class InvertibleConv1x1Layer(FlowLayer):
             self._kernel_t = tf.reshape(w, kernel_shape)
             self._inv_kernel_t = tf.reshape(w_inv, kernel_shape)
 
-    def forward(self, x, logdet, z, is_training: bool = True) -> FlowData:
+    def forward(self,
+                x,
+                logdet,
+                z,
+                y_label: tf.Tensor = None,
+                is_training: bool = True) -> FlowData:
         if self._input_shape is None:
             self._input_shape = K.int_shape(x)
             self.build()
-
         y = tf.nn.conv2d(x,
                          self._kernel_t, [1, 1, 1, 1],
                          "SAME",
                          data_format="NHWC")
-        return y, logdet + self._dlogdet_t, z
 
-    def backward(self, y, logdet, z, is_training: bool = True) -> FlowData:
+        return y, logdet + self._dlogdet_t, z, y_label
+
+    def backward(self,
+                 y,
+                 logdet,
+                 z,
+                 y_label: tf.Tensor = None,
+                 is_training: bool = True) -> FlowData:
 
         x = tf.nn.conv2d(y,
                          self._inv_kernel_t, [1, 1, 1, 1],
                          "SAME",
                          data_format="NHWC")
-        return x, logdet - self._dlogdet_t, z
+        return x, logdet - self._dlogdet_t, z, y_label
 
 
 class AffineCouplingLayer(FlowLayer):
@@ -756,7 +849,8 @@ class AffineCouplingLayer(FlowLayer):
         self._shift_and_log_scale_fn = shift_and_log_scale_fn
         self._log_scale_fn = log_scale_fn
 
-    def forward(self, x, logdet, z, is_training: bool = True) -> FlowData:
+    def forward(self, x, logdet, z, y_label,
+                is_training: bool = True) -> FlowData:
         input_shape = K.int_shape(x)
         assert len(input_shape) == 4
         num_channels = input_shape[3]
@@ -778,9 +872,10 @@ class AffineCouplingLayer(FlowLayer):
             dlogdet = 0.0
 
         y = tf.concat([x1, x2], axis=3)
-        return y, logdet + dlogdet, z
+        return y, logdet + dlogdet, z, y_label
 
-    def backward(self, y, logdet, z, is_training: bool = True) -> FlowData:
+    def backward(self, y, logdet, z, y_label,
+                 is_training: bool = True) -> FlowData:
         input_shape = K.int_shape(y)
         assert len(input_shape) == 4
         num_channels = input_shape[3]
@@ -799,4 +894,4 @@ class AffineCouplingLayer(FlowLayer):
             y2 -= shift
 
         x = tf.concat([y1, y2], axis=3)
-        return x, logdet + dlogdet, z
+        return x, logdet + dlogdet, z, y_label
