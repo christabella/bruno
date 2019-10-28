@@ -4,3 +4,7 @@ metadata/*/samples/*
 metadata/*/_samples/*
 
 __pycache__/
+
+logs/
+metadata/
+data/
