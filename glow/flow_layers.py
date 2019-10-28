@@ -858,7 +858,7 @@ class AffineCouplingLayer(FlowLayer):
         x1 = x[:, :, :, :num_channels // 2]
         x2 = x[:, :, :, num_channels // 2:]
 
-        shift, log_scale = self._shift_and_log_scale_fn(x1)
+        shift, log_scale = self._shift_and_log_scale_fn(x1, y_label)
 
         if shift is not None:
             x2 += shift
@@ -883,7 +883,7 @@ class AffineCouplingLayer(FlowLayer):
         y1 = y[:, :, :, :num_channels // 2]
         y2 = y[:, :, :, num_channels // 2:]
 
-        shift, log_scale = self._shift_and_log_scale_fn(y1)
+        shift, log_scale = self._shift_and_log_scale_fn(y1, y_label)
         if log_scale is not None:
             scale = self._log_scale_fn(log_scale)
             dlogdet = -tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])

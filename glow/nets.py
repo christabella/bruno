@@ -37,13 +37,31 @@ class OpenAITemplate(NamedTuple):
         Returns:
             a template function
         """
-        def _shift_and_log_scale_fn(x: tf.Tensor):
+        def _shift_and_log_scale_fn(x: tf.Tensor, y_label: tf.Tensor = None):
+            """NN is a shallow, 3 convolutions with 512 units: 3x3, 1x1, 3x3, the last one returns shift and logscale
+            """
             shape = K.int_shape(x)
             num_channels = shape[3]
 
             with tf.variable_scope("BlockNN"):
                 h = x
-                h = self.activation_fn(ops.conv2d("l_1", h, self.width))
+                # Concatenate conditioning labels with x.
+                # Just in the shift and log scale fn should be fine...
+                h = ops.conv2d("l_1", h, self.width)
+                depth = K.int_shape(h)[-1]
+                label_size = K.int_shape(y_label)[-1]
+                dense_w = tf.get_variable(
+                    "dense_w",
+                    shape=(label_size, depth),
+                    initializer=tf.contrib.layers.xavier_initializer())
+                dense_b = tf.get_variable(
+                    "dense_b",
+                    shape=(depth, ),
+                    initializer=tf.contrib.layers.xavier_initializer())
+
+                conditioning_y = tf.nn.xw_plus_b(y_label, dense_w, dense_b)
+                h = h + conditioning_y[:, None, None, :]
+                h = self.activation_fn(h)  # 3x3 filter
                 h = self.activation_fn(
                     ops.conv2d("l_2", h, self.width, filter_size=[1, 1]))
                 # create shift and log_scale with zero initialization
