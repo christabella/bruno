@@ -144,6 +144,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                         z_sample = gp_layer.sample(nr_samples=1)
                         z_samples.append(z_sample)
                         # Update each dimension of the latent space
+                        # 64, 1, 480
                         gp_layer.update_distribution(z_vec[:, i, :])
             else:  # Training mode
                 if n_context > 0:  # Some of sequence are context points

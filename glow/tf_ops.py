@@ -278,6 +278,11 @@ def conv2d_zeros(name,
                  logscale_factor=3,
                  skip=1,
                  edge_bias=True):
+    """Conv2dZeros is just a normal Conv2d layer with zero initialization described in paper 3.3 section:
+    We initialize the last convolution of each NN() with zeros, such that each
+    affine coupling layer initially performs an identity function; we found
+    that this helps training very deep networks.
+    """
     with tf.variable_scope(name):
         if edge_bias and pad == "SAME":
             x = add_edge_padding(x, filter_size)

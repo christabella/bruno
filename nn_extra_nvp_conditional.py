@@ -215,6 +215,12 @@ class CouplingLayerConv(Layer):
         return b
 
     def forward_and_jacobian(self, x, sum_log_det_jacobians, z, y_label=None):
+        """
+        x: (bs * seq_len, H, W, C), e.g. (4x16=64, 32, 32, 1)
+        sum_log_det_jacobians: (bs * seq_len)
+        z: None or split x
+        """
+
         with tf.variable_scope(self.name):
             xs = int_shape(x)
             b = self.get_mask(xs, self.mask_type)
@@ -527,14 +533,16 @@ def conv2d(x,
                                 use_bias=False,
                                 kernel_initializer=Orthogonal(),
                                 name='label_h')
-            output = tf.layers.conv2d(x,
-                                      num_filters,
-                                      kernel_size,
-                                      padding=pad,
-                                      activation=None,
-                                      kernel_initializer=kernel_initializer,
-                                      use_bias=True,
-                                      name=name)
+            output = tf.layers.conv2d(
+                x,
+                num_filters,  # Depth
+                kernel_size,
+                padding=pad,
+                activation=None,
+                kernel_initializer=kernel_initializer,
+                use_bias=True,
+                name=name)
+            # Kind of like adding a scalar to all pixels in eacb depth level; a different scalar for every filter/depth level
             output = output + h[:, None, None, :]
 
             if nonlinearity is not None:
@@ -598,6 +606,9 @@ def conv2d_wn(x,
             return x
 
         if y_label is not None:
+            # "We achieved the conditioning on h by concatenating the features
+            # of h to the inputs of every dense and convolutional layer inside
+            # the s and t networks." (conditional BRUNO paper)
             h = dense_wn(y_label,
                          units=num_filters,
                          activation=None,
