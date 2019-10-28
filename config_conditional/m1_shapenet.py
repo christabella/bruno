@@ -94,11 +94,10 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             name='labels_layer')
 
         log_det_jac = tf.zeros(x_bs_shape[0])  # seq_len * batch size
-        # 16 * 4 = (64, )
 
+        # Preprocess (scale and transform) values; shape doesn't change.
         y, log_det_jac = nn_extra_nvp.dequantization_forward_and_jacobian(
             x_bs, log_det_jac)
-        # y: (64, 32, 32, 1)
         y, log_det_jac = nn_extra_nvp.logit_forward_and_jacobian(
             y, log_det_jac)
 
@@ -110,21 +109,24 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                                                            log_det_jac,
                                                            z,
                                                            y_label=y_label_bs)
-
-        z = tf.concat([z, y], 3)
+        # y, log_det_jac, z: (64, 8, 8, 2), (64,), (64, 8, 8, 14)
+        z = tf.concat([z, y], 3)  # Join the channels back
+        # z: (64, 8, 8, 16)
         # Followed by 6 256-unit dense layers of alternating partitions/masks.
         for layer in nvp_dense_layers:
             z, log_det_jac, _ = layer.forward_and_jacobian(z,
                                                            log_det_jac,
                                                            None,
                                                            y_label=y_label_bs)
-
+        # log_det_jac, z: (64,), (64, 8, 8, 16)
         z_shape = nn_extra_nvp.int_shape(z)
         # Reshape z to (batch_size, seq_len, -1)
-        # (last dimension is probably number of dimensions in the data, HxWxC)
+        # (last dimension is number of dimensions in the data, HxWxC)
         z_vec = tf.reshape(z, (x_shape[0], x_shape[1], -1))
+        # z_vec: (4, 16, 1024), i.e. (bs, seq, -1), i.e. (bs, seq, H*W*C=ndim)
         # The log det jacobian z_i/x_i for every i in sequence of length n.
         log_det_jac = tf.reshape(log_det_jac, (x_shape[0], x_shape[1]))
+        # log_det_jac: (4, 16), i.e. (bs, seq)
 
         log_probs = []
         z_samples = []
