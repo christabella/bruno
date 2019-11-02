@@ -111,14 +111,10 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         # This is not having a sequence length... wait do we individually pass each image through its own normalizing flow?
         # Now we have batch size * seq len images in x_bs
         input_flow = fl.InputLayer(x_bs, y_label_bs)
-        # forward flow
+        # Forward flow
         output_flow = glow_model(input_flow, forward=True)
-        # backward flow
-        # reconstruction = glow_model(output_flow, forward=False)
-        # flow is a tuple of three tensors
         x, log_det_jac, z, y_label = output_flow
         #  x=[64, 2, 2, 16]	z=[64, 2, 2, 240]	logdet=[64]
-        # z is None...
         z = tf.concat([z, x], 3)  # Join the split channels back
         # [64, 2, 2, 256]
         z_shape = nn_extra_nvp.int_shape(z)
@@ -170,16 +166,19 @@ def build_model(x, y_label, init=False, sampling_mode=False):
             z_samples_shape = nn_extra_nvp.int_shape(z_samples)
             z_samples = tf.reshape(z_samples,
                                    z_shape)  # (n_samples*seq_len, z_img_shape)
+            x, log_det_jac, z, y_label = output_flow
+            output_x_shape = nn_extra_nvp.int_shape(x)
 
-            x_samples = None
-            # TODO do backward flow on glow model
-            # for layer in reversed(glow_layers):
-            #     x_samples, z_samples = layer.backward(x_samples,
-            #                                           z_samples,
-            #                                           y_label=y_label_bs)
+            split = output_x_shape[3]  # Channels in output flow's x portion
+            inverse_y, inverse_z = z_samples[:, :, :, :
+                                             split], z_samples[:, :, :, split:]
+            log_det_tmp = tf.zeros_like(log_det_jac)
+            inverse_flow = inverse_y, log_det_tmp, inverse_z, y_label_bs
 
-            # inverse logit
-            # x_samples = 1. / (1 + tf.exp(-x_samples))
+            print(f"Reconstructing model with inverse flow {inverse_flow}")
+            reconstruction = glow_model(inverse_flow, forward=False)
+            x_samples = reconstruction[0]
+
             x_samples = tf.reshape(x_samples,
                                    (z_samples_shape[0], z_samples_shape[1],
                                     x_shape[2], x_shape[3], x_shape[4]))
