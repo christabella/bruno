@@ -90,13 +90,14 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         y_label_shape = nn_extra_nvp.int_shape(y_label)
         y_label_bs = tf.reshape(
             y_label, (y_label_shape[0] * y_label_shape[1], y_label_shape[2]))
-        y_label_bs = tf.layers.dense(
-            y_label_bs,
-            units=32,
-            activation=tf.nn.leaky_relu,
-            kernel_initializer=nn_extra_nvp.Orthogonal(),
-            use_bias=True,
-            name='labels_layer')
+        # Try commenting this out, what's the point of it?
+        # y_label_bs = tf.layers.dense(
+        #     y_label_bs,
+        #     units=32,
+        #     activation=tf.nn.leaky_relu,
+        #     kernel_initializer=nn_extra_nvp.Orthogonal(),
+        #     use_bias=True,
+        #     name='labels_layer')
 
         log_det_jac = tf.zeros(x_bs_shape[0])
         # GLOW doesn't do any pretransformation from jittering
