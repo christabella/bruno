@@ -33,6 +33,7 @@ assert args.nr_gpu == len(''.join(
     filter(str.isdigit, os.environ["CUDA_VISIBLE_DEVICES"])))
 # -----------------------------------------------------------------------------
 np.random.seed(seed=42)
+# Just in case, since there's only one default tensorflow graph for all of the tensors accessed during runtime
 tf.reset_default_graph()
 tf.set_random_seed(0)
 
@@ -183,107 +184,113 @@ else:
 
 start_time = time.time()
 with tf.Session() as sess:
-    if args.resume:
-        ckpt_file = save_dir + 'params.ckpt'
-        print('restoring parameters from', ckpt_file)
-        saver.restore(sess, tf.train.latest_checkpoint(save_dir))
+    # Write the session graph to summary directory
+    with tf.summary.FileWriter('summaries', sess.graph) as writer:
+        if args.resume:
+            ckpt_file = save_dir + 'params.ckpt'
+            print('restoring parameters from', ckpt_file)
+            saver.restore(sess, tf.train.latest_checkpoint(save_dir))
 
-    prev_time = time.clock()
-    for iteration, (x_batch, y_batch) in zip(batch_idxs,
-                                             train_data_iter.generate()):
-        assert not np.any(np.isnan(y_batch))
-        assert not np.any(np.isnan(x_batch))
-        if hasattr(config, 'learning_rate_schedule'
-                   ) and iteration in config.learning_rate_schedule:
-            lr = np.float32(config.learning_rate_schedule[iteration])
-        elif hasattr(config, 'lr_decay'):
-            lr *= config.lr_decay
+        prev_time = time.clock()
+        for iteration, (x_batch, y_batch) in zip(batch_idxs,
+                                                 train_data_iter.generate()):
+            assert not np.any(np.isnan(y_batch))
+            assert not np.any(np.isnan(x_batch))
+            if hasattr(config, 'learning_rate_schedule'
+                       ) and iteration in config.learning_rate_schedule:
+                lr = np.float32(config.learning_rate_schedule[iteration])
+            elif hasattr(config, 'lr_decay'):
+                lr *= config.lr_decay
 
-        if hasattr(
-                config,
-                'gp_grad_schedule') and iteration in config.gp_grad_schedule:
-            gp_grad_scale = np.float32(config.gp_grad_schedule[iteration])
-            print('setting gp grad scale to %.7f' %
-                  config.gp_grad_schedule[iteration])
+            if hasattr(config, 'gp_grad_schedule'
+                       ) and iteration in config.gp_grad_schedule:
+                gp_grad_scale = np.float32(config.gp_grad_schedule[iteration])
+                print('setting gp grad scale to %.7f' %
+                      config.gp_grad_schedule[iteration])
 
-        if args.resume and iteration < last_iteration:
-            if iteration % (print_every * 10) == 0:
-                print(iteration, 'skipping training')
-            continue
+            if args.resume and iteration < last_iteration:
+                if iteration % (print_every * 10) == 0:
+                    print(iteration, 'skipping training')
+                continue
 
-        # init
-        if iteration == 0:
-            print('initializing the model...')
-            sess.run(initializer)
-            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-            sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
-            init_loss = sess.run(init_pass, {x_init: x_batch, y_init: y_batch})
-            print(f'Initial loss: {init_loss}')
-            if np.isnan(init_loss).any():
-                print('Loss is NaN')
-                import pdb
-                pdb.set_trace()
-            sess.graph.finalize()
-        else:
-            xfs = np.split(x_batch, args.nr_gpu)
-            yfs = np.split(y_batch, args.nr_gpu)
-            feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
-            feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
-            feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
-            l, _ = sess.run([train_loss, train_step], feed_dict)
-            train_iter_losses.append(l)
-            if np.isnan(l):
-                print('Loss is NaN')
-                import pdb
-                pdb.set_trace()
-                sys.exit(0)
+            # init
+            if iteration == 0:
+                print('initializing the model...')
+                sess.run(initializer)
+                sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+                sess.add_tensor_filter("has_inf_or_nan",
+                                       tf_debug.has_inf_or_nan)
+                init_loss = sess.run(init_pass, {
+                    x_init: x_batch,
+                    y_init: y_batch
+                })
+                print(f'Initial loss: {init_loss}')
+                if np.isnan(init_loss).any():
+                    print('Loss is NaN')
+                    import pdb
+                    pdb.set_trace()
+                sess.graph.finalize()
+            else:
+                xfs = np.split(x_batch, args.nr_gpu)
+                yfs = np.split(y_batch, args.nr_gpu)
+                feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
+                feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
+                feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
+                l, _ = sess.run([train_loss, train_step], feed_dict)
+                train_iter_losses.append(l)
+                if np.isnan(l):
+                    print('Loss is NaN')
+                    import pdb
+                    pdb.set_trace()
+                    sys.exit(0)
 
-            if (iteration + 1) % print_every == 0:
-                avg_train_loss = np.mean(train_iter_losses)
-                losses_avg_train.append(avg_train_loss)
-                train_iter_losses = []
-                print('%d/%d train_loss=%6.8f bits/value=%.3f' %
-                      (iteration + 1, config.max_iter, avg_train_loss,
-                       avg_train_loss / config.ndim / np.log(2.)))
-                corr = config.gp_layer.corr.eval().flatten()
+                if (iteration + 1) % print_every == 0:
+                    avg_train_loss = np.mean(train_iter_losses)
+                    losses_avg_train.append(avg_train_loss)
+                    train_iter_losses = []
+                    print('%d/%d train_loss=%6.8f bits/value=%.3f' %
+                          (iteration + 1, config.max_iter, avg_train_loss,
+                           avg_train_loss / config.ndim / np.log(2.)))
+                    corr = config.gp_layer.corr.eval().flatten()
 
-            if (iteration + 1) % config.save_every == 0:
-                current_time = time.time()
-                eta_time = (config.max_iter - iteration
-                            ) / config.save_every * (current_time - prev_time)
-                prev_time = current_time
-                print('ETA: ', time.strftime("%H:%M:%S",
-                                             time.gmtime(eta_time)))
-                print('Saving model (iteration %s):' % iteration,
-                      experiment_id)
-                print('current learning rate:', lr)
-                saver.save(sess, save_dir + '/params.ckpt')
+                if (iteration + 1) % config.save_every == 0:
+                    current_time = time.time()
+                    eta_time = (config.max_iter -
+                                iteration) / config.save_every * (
+                                    current_time - prev_time)
+                    prev_time = current_time
+                    print('ETA: ',
+                          time.strftime("%H:%M:%S", time.gmtime(eta_time)))
+                    print('Saving model (iteration %s):' % iteration,
+                          experiment_id)
+                    print('current learning rate:', lr)
+                    saver.save(sess, save_dir + '/params.ckpt')
 
-                with open(save_dir + '/meta.pkl', 'wb') as f:
-                    pickle.dump(
-                        {
-                            'lr': lr,
-                            'iteration': iteration + 1,
-                            'losses_avg_train': losses_avg_train,
-                            'losses_eval_valid': losses_eval_valid,
-                            'losses_eval_train': losses_eval_train
-                        }, f)
+                    with open(save_dir + '/meta.pkl', 'wb') as f:
+                        pickle.dump(
+                            {
+                                'lr': lr,
+                                'iteration': iteration + 1,
+                                'losses_avg_train': losses_avg_train,
+                                'losses_eval_valid': losses_eval_valid,
+                                'losses_eval_train': losses_eval_train
+                            }, f)
 
-                corr = config.gp_layer.corr.eval().flatten()
-                print('0.01', np.sum(corr > 0.01))
-                print('0.1', np.sum(corr > 0.1))
-                print('0.2', np.sum(corr > 0.2))
-                print('0.3', np.sum(corr > 0.3))
-                print('0.5', np.sum(corr > 0.5))
-                print('0.7', np.sum(corr > 0.7))
-                print('corr min-max:', np.min(corr), np.max(corr))
-                var = config.gp_layer.var.eval().flatten()
-                print('var min-max:', np.min(var), np.max(var))
+                    corr = config.gp_layer.corr.eval().flatten()
+                    print('0.01', np.sum(corr > 0.01))
+                    print('0.1', np.sum(corr > 0.1))
+                    print('0.2', np.sum(corr > 0.2))
+                    print('0.3', np.sum(corr > 0.3))
+                    print('0.5', np.sum(corr > 0.5))
+                    print('0.7', np.sum(corr > 0.7))
+                    print('corr min-max:', np.min(corr), np.max(corr))
+                    var = config.gp_layer.var.eval().flatten()
+                    print('var min-max:', np.min(var), np.max(var))
 
-                if hasattr(config.gp_layer, 'nu'):
-                    nu = config.gp_layer.nu.eval().flatten()
-                    print('nu median-min-max:', np.median(nu), np.min(nu),
-                          np.max(nu))
+                    if hasattr(config.gp_layer, 'nu'):
+                        nu = config.gp_layer.nu.eval().flatten()
+                        print('nu median-min-max:', np.median(nu), np.min(nu),
+                              np.max(nu))
 
 print('Total time: ',
       time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
