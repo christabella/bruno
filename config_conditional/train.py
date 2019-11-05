@@ -8,6 +8,7 @@ import time
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
 
 import logger
 import utils
@@ -190,7 +191,8 @@ with tf.Session() as sess:
     prev_time = time.clock()
     for iteration, (x_batch, y_batch) in zip(batch_idxs,
                                              train_data_iter.generate()):
-
+        assert not np.any(np.isnan(y_batch))
+        assert not np.any(np.isnan(x_batch))
         if hasattr(config, 'learning_rate_schedule'
                    ) and iteration in config.learning_rate_schedule:
             lr = np.float32(config.learning_rate_schedule[iteration])
@@ -213,7 +215,14 @@ with tf.Session() as sess:
         if iteration == 0:
             print('initializing the model...')
             sess.run(initializer)
+            sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+            sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
             init_loss = sess.run(init_pass, {x_init: x_batch, y_init: y_batch})
+            print(f'Initial loss: {init_loss}')
+            if np.isnan(init_loss).any():
+                print('Loss is NaN')
+                import pdb
+                pdb.set_trace()
             sess.graph.finalize()
         else:
             xfs = np.split(x_batch, args.nr_gpu)
@@ -225,6 +234,8 @@ with tf.Session() as sess:
             train_iter_losses.append(l)
             if np.isnan(l):
                 print('Loss is NaN')
+                import pdb
+                pdb.set_trace()
                 sys.exit(0)
 
             if (iteration + 1) % print_every == 0:
