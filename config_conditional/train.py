@@ -27,6 +27,10 @@ parser.add_argument('--resume',
                     type=int,
                     default=0,
                     help='Resume training from a checkpoint?')
+parser.add_argument('--debug',
+                    type=int,
+                    default=1,
+                    help='Enable tensorflow debugger (TFDBG)?')
 args = parser.parse_args()
 print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))
 assert args.nr_gpu == len(''.join(
@@ -217,9 +221,10 @@ with tf.Session() as sess:
             if iteration == 0:
                 print('initializing the model...')
                 sess.run(initializer)
-                sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-                sess.add_tensor_filter("has_inf_or_nan",
-                                       tf_debug.has_inf_or_nan)
+                if args.debug:
+                    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+                    sess.add_tensor_filter("has_inf_or_nan",
+                                           tf_debug.has_inf_or_nan)
                 init_loss = sess.run(init_pass, {
                     x_init: x_batch,
                     y_init: y_batch

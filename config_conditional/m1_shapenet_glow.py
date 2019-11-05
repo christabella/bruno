@@ -11,6 +11,7 @@ from config_conditional import defaults
 from glow import flow_layers as fl
 from glow import nets
 
+K = tf.keras.backend
 batch_size = 4
 rng = np.random.RandomState(42)
 rng_test = np.random.RandomState(317070)
@@ -82,15 +83,15 @@ def build_model(x, y_label, init=False, sampling_mode=False):
                 shape=(ndim, ), corr_init=corr_init)
 
         # (batch_size, seq_len, 32, 32, channels=1)
-        x_shape = nn_extra_nvp.int_shape(x)
+        x_shape = K.int_shape(x)
         x_bs = tf.reshape(
             x, (x_shape[0] * x_shape[1], x_shape[2], x_shape[3], x_shape[4]))
-        x_bs_shape = nn_extra_nvp.int_shape(x_bs)
+        x_bs_shape = K.int_shape(x_bs)
 
-        y_label_shape = nn_extra_nvp.int_shape(y_label)
+        y_label_shape = K.int_shape(y_label)
         y_label_bs = tf.reshape(
             y_label, (y_label_shape[0] * y_label_shape[1], y_label_shape[2]))
-        # Try commenting this out, what's the point of it?
+        # Extract features of conditioning h (y labels).
         y_label_bs = tf.layers.dense(
             y_label_bs,
             units=32,
@@ -117,7 +118,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         #  x=[64, 2, 2, 16]	z=[64, 2, 2, 240]	logdet=[64]
         z = tf.concat([z, x], 3)  # Join the split channels back
         # [64, 2, 2, 256]
-        z_shape = nn_extra_nvp.int_shape(z)
+        z_shape = K.int_shape(z)
         # Reshape z to (batch_size, seq_len, -1)
         # (last dimension is probably number of dimensions in the data, HxWxC)
         z_vec = tf.reshape(z, (x_shape[0], x_shape[1], -1))  # 4, 16, 1024
@@ -163,11 +164,11 @@ def build_model(x, y_label, init=False, sampling_mode=False):
 
         if sampling_mode:
             z_samples = tf.concat(z_samples, 1)
-            z_samples_shape = nn_extra_nvp.int_shape(z_samples)
+            z_samples_shape = K.int_shape(z_samples)
             z_samples = tf.reshape(z_samples,
                                    z_shape)  # (n_samples*seq_len, z_img_shape)
             x, log_det_jac, z, y_label = output_flow
-            output_x_shape = nn_extra_nvp.int_shape(x)
+            output_x_shape = K.int_shape(x)
 
             split = output_x_shape[3]  # Channels in output flow's x portion
             inverse_y, inverse_z = z_samples[:, :, :, :
