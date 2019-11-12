@@ -30,15 +30,16 @@ class GaussianRecurrentLayer(object):
             self.var_vbl = tf.get_variable(
                 "prior_var", (1, ) + shape, tf.float32,
                 tf.constant_initializer(inv_softplus(np.sqrt(var_init))))
-            self.var = tf.square(tf.nn.softplus(self.var_vbl))
+            self.var = tf.square(tf.nn.softplus(self.var_vbl))  # v
 
             self.prior = Gaussian(self.mu, self.var)
 
             self.corr_vbl = tf.get_variable(
                 "prior_corr", (1, ) + shape, tf.float32,
                 tf.constant_initializer(inv_sigmoid(corr_init)))
-            self.corr = tf.sigmoid(self.corr_vbl)
-            self.cov = tf.sigmoid(self.corr_vbl) * self.var
+            self.corr = tf.sigmoid(
+                self.corr_vbl)  # Correlations, rho/v (being plotted).
+            self.cov = tf.sigmoid(self.corr_vbl) * self.var  # rho = rho/v * v
 
             self.current_distribution = self.prior
             self._state = State(0., 0.)
@@ -72,6 +73,7 @@ class GaussianRecurrentLayer(object):
         x_zm = x - self.mu
         x_sum_out = x_sum + x_zm
         i += 1
+        # self.cov = rho, self.var = v, i = n
         dd = self.cov / (self.var + self.cov * (i - 1.))
         # Recurrent updates in equation 9 of BRUNO.
         mu_out = (1. - dd) * mu + observation * dd
