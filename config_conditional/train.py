@@ -171,6 +171,17 @@ with tf.device('/gpu:0'):
                     name='adam')
 
 train_loss = train_losses[0]
+# Create a summary to monitor cost tensor
+tf.summary.scalar('train_loss', train_loss)
+# Create summaries to visualize weights
+for var in tf.trainable_variables():
+    tf.summary.histogram(var.name, var)
+# Summarize all gradients
+for grad, var in grads_and_vars:
+    tf.summary.histogram(var.name + '/gradient', grad)
+# Merge all summaries into a single op
+all_summary_ops = tf.summary.merge_all()
+# all_summary_ops = tf.contrib.summary.all_summary_ops()
 
 # init & save
 initializer = tf.global_variables_initializer()
@@ -247,7 +258,12 @@ with tf.Session() as sess:
                 feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
                 feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
                 feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
-                l, _ = sess.run([train_loss, train_step], feed_dict)
+                # Run optimization op (backprop), cost op (to get loss value)
+                # and summary nodes
+                _, l, summary = sess.run(
+                    [train_step, train_loss, all_summary_ops], feed_dict)
+                # Write logs at every iteration
+                writer.add_summary(summary, iteration + 1)
                 train_iter_losses.append(l)
                 if np.isnan(l):
                     print('Loss is NaN')
