@@ -130,23 +130,24 @@ tf_lr = tf.placeholder(tf.float32, shape=[])
 tf_gp_grad_scale = tf.placeholder(tf.float32, shape=[])
 with tf.device('/gpu:0'):
     # Losses and grads of first gpu is the average of all of them? ?_?
+    num_variables = len(grads[0])
     for i in range(1, args.nr_gpu):  # Skip if only 1 GPU
         train_losses[0] += train_losses[i]
-        for j in range(len(grads[0])):
+        for j in range(num_variables):
             grads[0][j] += grads[i][j]
     # average over gpus
     train_losses[0] /= args.nr_gpu
-    for j in range(len(grads[0])):
+    for j in range(num_variables):
         grads[0][j] /= args.nr_gpu
 
     # scale gradients of gp_params
     gp_params = ['prior_nu', 'prior_mean', 'prior_var', 'prior_corr']
-    for j in range(len(grads[0])):
+    for j in range(num_variables):
         if any(name in all_params[j].name for name in gp_params):
             grads[0][j] *= tf_gp_grad_scale
 
-    # training op
-    grads_and_vars = zip(grads[0], all_params)
+    # training op; grads[0] is the average over all GPUs
+    grads_and_vars = list(zip(grads[0], all_params))
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     update_ops_gpu0 = []
     for u in update_ops:
