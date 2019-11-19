@@ -119,8 +119,11 @@ for i in range(args.nr_gpu):
             with tf.variable_scope('train'):
                 log_probs = model(xs[i], ys[i])[0]
                 # log probs is Tensor("gpu_0/train/model/stack:0", shape=(4, 15), dtype=float32, device=/device:GPU:0)
-                train_losses.append(config.loss(log_probs))
-                grads.append(tf.gradients(train_losses[i], all_params))
+                train_loss = config.loss(log_probs)
+                train_losses.append(train_loss)
+                # Op to calculate every variable gradient
+                grad = tf.gradients(train_losses[i], all_params)
+                grads.append(grad)
 
 # add gradients together and get training updates
 tf_lr = tf.placeholder(tf.float32, shape=[])
@@ -180,16 +183,18 @@ batch_idxs = range(0, config.max_iter)
 print_every = 100
 train_iter_losses = []
 if args.resume:
-    losses_eval_valid = resumed_metadata['losses_eval_valid']
     losses_eval_train = resumed_metadata['losses_eval_train']
     losses_avg_train = resumed_metadata['losses_avg_train']
 else:
-    losses_eval_valid, losses_eval_train, losses_avg_train = [], [], []
+    losses_eval_train, losses_avg_train = [], []
 
 start_time = time.time()
 with tf.Session() as sess:
     # Write the session graph to summary directory
-    with tf.summary.FileWriter('summaries', sess.graph) as writer:
+    with tf.summary.FileWriter(f'summaries/{experiment_id}/train',
+                               sess.graph) as writer:
+        # writer_flush = writer.flush()
+
         if args.resume:
             ckpt_file = save_dir + 'params.ckpt'
             print('restoring parameters from', ckpt_file)
