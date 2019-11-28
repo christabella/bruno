@@ -29,7 +29,7 @@ parser.add_argument('--resume',
                     help='Resume training from a checkpoint?')
 parser.add_argument('--debug',
                     type=int,
-                    default=1,
+                    default=0,
                     help='Enable tensorflow debugger (TFDBG)?')
 args = parser.parse_args()
 print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))
@@ -203,7 +203,7 @@ else:
 start_time = time.time()
 with tf.Session() as sess:
     # Write the session graph to summary directory
-    with tf.summary.FileWriter(f'summaries/{experiment_id}/train',
+    with tf.summary.FileWriter(f'summaries/{experiment_id}',
                                sess.graph) as writer:
         # writer_flush = writer.flush()
 
@@ -299,7 +299,6 @@ with tf.Session() as sess:
                                 'lr': lr,
                                 'iteration': iteration + 1,
                                 'losses_avg_train': losses_avg_train,
-                                'losses_eval_valid': losses_eval_valid,
                                 'losses_eval_train': losses_eval_train
                             }, f)
 
