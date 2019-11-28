@@ -173,6 +173,15 @@ with tf.device('/gpu:0'):
 train_loss = train_losses[0]
 # Create a summary to monitor cost tensor
 tf.summary.scalar('train_loss', train_loss)
+# Maybe plot GP correlations.
+corr = config.gp_layer.corr
+mean = tf.reduce_mean(corr)
+tf.summary.scalar('gp_corr_mean', mean)
+stddev = tf.sqrt(tf.reduce_mean(tf.square(corr - mean)))
+tf.summary.scalar('gp_corr_stddev', stddev)
+tf.summary.scalar('gp_corr_max', tf.reduce_max(corr))
+tf.summary.scalar('gp_corr_min', tf.reduce_min(corr))
+tf.summary.histogram('gp_correlations', corr)
 # Create summaries to visualize weights
 for var in tf.trainable_variables():
     tf.summary.histogram(var.name, var)
@@ -262,8 +271,6 @@ with tf.Session() as sess:
                 # and summary nodes
                 _, l, summary = sess.run(
                     [train_step, train_loss, all_summary_ops], feed_dict)
-                # Write logs at every iteration
-                writer.add_summary(summary, iteration + 1)
                 train_iter_losses.append(l)
                 if np.isnan(l):
                     print('Loss is NaN')
@@ -272,6 +279,8 @@ with tf.Session() as sess:
                     sys.exit(0)
 
                 if (iteration + 1) % print_every == 0:
+                    # Write logs at every 100th iteration
+                    writer.add_summary(summary, iteration + 1)
                     avg_train_loss = np.mean(train_iter_losses)
                     losses_avg_train.append(avg_train_loss)
                     train_iter_losses = []
