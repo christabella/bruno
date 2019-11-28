@@ -96,7 +96,7 @@ def load_shapenet(set='train',
     ]
     x, y, angles = [], [], []
     for p in data_paths:
-        data = np.load(p)
+        data = np.load(p, allow_pickle=True)
 
         total_items = data.shape[0]
         train_size = (int)(train_fraction * total_items)
