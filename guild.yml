@@ -1,0 +1,22 @@
+- model: conditional_bruno
+  description: Conditional BRUNO
+  operations:
+    train:
+      description: Train the model
+      main: config_conditional.train
+      requires:
+        - file: data
+      flags:
+        config_name:
+          choices:
+            - m1_shapenet_glow
+            - m1_shapenet_glow_width=32
+
+      flags-import-skip:
+        - data-dir
+        - model-dir
+      output-scalars: no
+
+  sourcecode:
+    - exclude:
+        dir: data
