@@ -172,25 +172,41 @@ with tf.device('/gpu:0'):
 
 train_loss = train_losses[0]
 # Create a summary to monitor cost tensor
-tf.summary.scalar('train_loss', train_loss)
+train_loss_summary = tf.summary.scalar('train_loss', train_loss)
 # Maybe plot GP correlations.
+essential_ops = [train_loss_summary]
 corr = config.gp_layer.corr
 mean = tf.reduce_mean(corr)
-tf.summary.scalar('gp_corr_mean', mean)
+essential_ops.append(tf.summary.scalar('gp_corr/mean', mean))
 stddev = tf.sqrt(tf.reduce_mean(tf.square(corr - mean)))
-tf.summary.scalar('gp_corr_stddev', stddev)
-tf.summary.scalar('gp_corr_max', tf.reduce_max(corr))
-tf.summary.scalar('gp_corr_min', tf.reduce_min(corr))
-tf.summary.histogram('gp_correlations', corr)
+essential_ops.append(tf.summary.scalar('gp_corr/stddev', stddev))
+essential_ops.append(tf.summary.scalar('gp_corr/max', tf.reduce_max(corr)))
+essential_ops.append(tf.summary.scalar('gp_corr/min', tf.reduce_min(corr)))
+essential_ops.append(tf.summary.histogram('gp_correlations', corr))
+
+detailed_ops = []
 # Create summaries to visualize weights
 for var in tf.trainable_variables():
-    tf.summary.histogram(var.name, var)
+    if "gaussian" in var.name:
+        essential_ops.append(
+            tf.summary.histogram(var.name.replace(':', '_'), var))
+    else:
+        detailed_ops.append(
+            tf.summary.histogram(var.name.replace(':', '_'), var))
 # Summarize all gradients
 for grad, var in grads_and_vars:
-    tf.summary.histogram(var.name + '/gradient', grad)
-# Merge all summaries into a single op
-all_summary_ops = tf.summary.merge_all()
-# all_summary_ops = tf.contrib.summary.all_summary_ops()
+    if "gaussian" in var.name:
+        essential_ops.append(
+            tf.summary.histogram('gradients/' + var.name.replace(':', '_'),
+                                 grad))
+    else:
+        detailed_ops.append(
+            tf.summary.histogram('gradients/' + var.name.replace(':', '_'),
+                                 grad))
+# Merge all essential summaries into a single op
+merged_essential_ops = tf.summary.merge(essential_ops)
+# Merge all extra detailed summaries into a single op
+merged_detailed_ops = tf.summary.merge(detailed_ops)
 
 # init & save
 initializer = tf.global_variables_initializer()
@@ -211,121 +227,120 @@ else:
 
 start_time = time.time()
 with tf.Session() as sess:
-    # Write the session graph to summary directory
-    with tf.summary.FileWriter(f'summaries/{experiment_id}',
-                               sess.graph) as writer:
-        # writer_flush = writer.flush()
+    # Write the session graph and TF event files to summary directory, which
+    # can be anywhere in the current working directory (Guild run directory).
+    writer = tf.summary.FileWriter(f'summaries', sess.graph)
+    detailed_writer = tf.summary.FileWriter(f'../detailed_summaries',
+                                            sess.graph)
+    if args.resume:
+        ckpt_file = save_dir + 'params.ckpt'
+        print('restoring parameters from', ckpt_file)
+        saver.restore(sess, tf.train.latest_checkpoint(save_dir))
 
-        if args.resume:
-            ckpt_file = save_dir + 'params.ckpt'
-            print('restoring parameters from', ckpt_file)
-            saver.restore(sess, tf.train.latest_checkpoint(save_dir))
+    prev_time = time.clock()
+    for iteration, (x_batch, y_batch) in zip(batch_idxs,
+                                             train_data_iter.generate()):
+        assert not np.any(np.isnan(y_batch))
+        assert not np.any(np.isnan(x_batch))
+        if hasattr(config, 'learning_rate_schedule'
+                   ) and iteration in config.learning_rate_schedule:
+            lr = np.float32(config.learning_rate_schedule[iteration])
+        elif hasattr(config, 'lr_decay'):
+            lr *= config.lr_decay
 
-        prev_time = time.clock()
-        for iteration, (x_batch, y_batch) in zip(batch_idxs,
-                                                 train_data_iter.generate()):
-            assert not np.any(np.isnan(y_batch))
-            assert not np.any(np.isnan(x_batch))
-            if hasattr(config, 'learning_rate_schedule'
-                       ) and iteration in config.learning_rate_schedule:
-                lr = np.float32(config.learning_rate_schedule[iteration])
-            elif hasattr(config, 'lr_decay'):
-                lr *= config.lr_decay
+        if hasattr(
+                config,
+                'gp_grad_schedule') and iteration in config.gp_grad_schedule:
+            gp_grad_scale = np.float32(config.gp_grad_schedule[iteration])
+            print('setting gp grad scale to %.7f' %
+                  config.gp_grad_schedule[iteration])
 
-            if hasattr(config, 'gp_grad_schedule'
-                       ) and iteration in config.gp_grad_schedule:
-                gp_grad_scale = np.float32(config.gp_grad_schedule[iteration])
-                print('setting gp grad scale to %.7f' %
-                      config.gp_grad_schedule[iteration])
+        if args.resume and iteration < last_iteration:
+            if iteration % (print_every * 10) == 0:
+                print(iteration, 'skipping training')
+            continue
 
-            if args.resume and iteration < last_iteration:
-                if iteration % (print_every * 10) == 0:
-                    print(iteration, 'skipping training')
-                continue
+        # init
+        if iteration == 0:
+            print('initializing the model...')
+            sess.run(initializer)
+            if args.debug:
+                sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+                sess.add_tensor_filter("has_inf_or_nan",
+                                       tf_debug.has_inf_or_nan)
+            init_loss = sess.run(init_pass, {x_init: x_batch, y_init: y_batch})
+            print(f'Initial loss: {init_loss}')
+            if np.isnan(init_loss).any():
+                print('Loss is NaN')
+                import pdb
+                pdb.set_trace()
+            sess.graph.finalize()
+        else:
+            xfs = np.split(x_batch, args.nr_gpu)
+            yfs = np.split(y_batch, args.nr_gpu)
+            feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
+            feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
+            feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
+            # Run optimization op (backprop), cost op (to get loss value)
+            # and summary nodes
+            _, l = sess.run([train_step, train_loss], feed_dict)
+            train_iter_losses.append(l)
+            if np.isnan(l):
+                print('Loss is NaN')
+                import pdb
+                pdb.set_trace()
+                sys.exit(0)
 
-            # init
-            if iteration == 0:
-                print('initializing the model...')
-                sess.run(initializer)
-                if args.debug:
-                    sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-                    sess.add_tensor_filter("has_inf_or_nan",
-                                           tf_debug.has_inf_or_nan)
-                init_loss = sess.run(init_pass, {
-                    x_init: x_batch,
-                    y_init: y_batch
-                })
-                print(f'Initial loss: {init_loss}')
-                if np.isnan(init_loss).any():
-                    print('Loss is NaN')
-                    import pdb
-                    pdb.set_trace()
-                sess.graph.finalize()
-            else:
-                xfs = np.split(x_batch, args.nr_gpu)
-                yfs = np.split(y_batch, args.nr_gpu)
-                feed_dict = {tf_lr: lr, tf_gp_grad_scale: gp_grad_scale}
-                feed_dict.update({xs[i]: xfs[i] for i in range(args.nr_gpu)})
-                feed_dict.update({ys[i]: yfs[i] for i in range(args.nr_gpu)})
-                # Run optimization op (backprop), cost op (to get loss value)
-                # and summary nodes
-                _, l, summary = sess.run(
-                    [train_step, train_loss, all_summary_ops], feed_dict)
-                train_iter_losses.append(l)
-                if np.isnan(l):
-                    print('Loss is NaN')
-                    import pdb
-                    pdb.set_trace()
-                    sys.exit(0)
+            if (iteration + 1) % print_every == 0:
+                summary_essential, summary_detailed = sess.run(
+                    [merged_essential_ops, merged_detailed_ops], feed_dict)
+                # Write logs at every 100th iteration
+                writer.add_summary(summary_essential, iteration + 1)
+                detailed_writer.add_summary(summary_detailed, iteration + 1)
+                avg_train_loss = np.mean(train_iter_losses)
+                losses_avg_train.append(avg_train_loss)
+                train_iter_losses = []
+                print('%d/%d train_loss=%6.8f bits/value=%.3f' %
+                      (iteration + 1, config.max_iter, avg_train_loss,
+                       avg_train_loss / config.ndim / np.log(2.)))
+                corr = config.gp_layer.corr.eval().flatten()
 
-                if (iteration + 1) % print_every == 0:
-                    # Write logs at every 100th iteration
-                    writer.add_summary(summary, iteration + 1)
-                    avg_train_loss = np.mean(train_iter_losses)
-                    losses_avg_train.append(avg_train_loss)
-                    train_iter_losses = []
-                    print('%d/%d train_loss=%6.8f bits/value=%.3f' %
-                          (iteration + 1, config.max_iter, avg_train_loss,
-                           avg_train_loss / config.ndim / np.log(2.)))
-                    corr = config.gp_layer.corr.eval().flatten()
+            if (iteration + 1) % config.save_every == 0:
+                current_time = time.time()
+                eta_time = (config.max_iter - iteration
+                            ) / config.save_every * (current_time - prev_time)
+                prev_time = current_time
+                print('ETA: ', time.strftime("%H:%M:%S",
+                                             time.gmtime(eta_time)))
+                print('Saving model (iteration %s):' % iteration,
+                      experiment_id)
+                print('current learning rate:', lr)
+                saver.save(sess, save_dir + '/params.ckpt')
 
-                if (iteration + 1) % config.save_every == 0:
-                    current_time = time.time()
-                    eta_time = (config.max_iter -
-                                iteration) / config.save_every * (
-                                    current_time - prev_time)
-                    prev_time = current_time
-                    print('ETA: ',
-                          time.strftime("%H:%M:%S", time.gmtime(eta_time)))
-                    print('Saving model (iteration %s):' % iteration,
-                          experiment_id)
-                    print('current learning rate:', lr)
-                    saver.save(sess, save_dir + '/params.ckpt')
+                with open(save_dir + '/meta.pkl', 'wb') as f:
+                    pickle.dump(
+                        {
+                            'lr': lr,
+                            'iteration': iteration + 1,
+                            'losses_avg_train': losses_avg_train,
+                            'losses_eval_train': losses_eval_train
+                        }, f)
 
-                    with open(save_dir + '/meta.pkl', 'wb') as f:
-                        pickle.dump(
-                            {
-                                'lr': lr,
-                                'iteration': iteration + 1,
-                                'losses_avg_train': losses_avg_train,
-                                'losses_eval_train': losses_eval_train
-                            }, f)
+                corr = config.gp_layer.corr.eval().flatten()
+                print('0.01', np.sum(corr > 0.01))
+                print('0.1', np.sum(corr > 0.1))
+                print('0.2', np.sum(corr > 0.2))
+                print('0.3', np.sum(corr > 0.3))
+                print('0.5', np.sum(corr > 0.5))
+                print('0.7', np.sum(corr > 0.7))
+                print('corr min-max:', np.min(corr), np.max(corr))
+                var = config.gp_layer.var.eval().flatten()
+                print('var min-max:', np.min(var), np.max(var))
 
-                    corr = config.gp_layer.corr.eval().flatten()
-                    print('0.01', np.sum(corr > 0.01))
-                    print('0.1', np.sum(corr > 0.1))
-                    print('0.2', np.sum(corr > 0.2))
-                    print('0.3', np.sum(corr > 0.3))
-                    print('0.5', np.sum(corr > 0.5))
-                    print('0.7', np.sum(corr > 0.7))
-                    print('corr min-max:', np.min(corr), np.max(corr))
-                    var = config.gp_layer.var.eval().flatten()
-                    print('var min-max:', np.min(var), np.max(var))
-
-                    if hasattr(config.gp_layer, 'nu'):
-                        nu = config.gp_layer.nu.eval().flatten()
-                        print('nu median-min-max:', np.median(nu), np.min(nu),
-                              np.max(nu))
+                if hasattr(config.gp_layer, 'nu'):
+                    nu = config.gp_layer.nu.eval().flatten()
+                    print('nu median-min-max:', np.median(nu), np.min(nu),
+                          np.max(nu))
 
 print('Total time: ',
       time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
