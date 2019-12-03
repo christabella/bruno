@@ -10,11 +10,23 @@
         config_name:
           choices:
             - m1_shapenet_glow
+            - m1_shapenet
             - m1_shapenet_glow_width=32
+      output-scalars: no
 
-      flags-import-skip:
-        - data-dir
-        - model-dir
+  sourcecode:
+    - exclude:
+        dir:
+          - data
+          - metadata
+          - logs
+    - exclude: '*.out'
+
+
+- model: simple
+  operations:
+    train:
+      main: simple_model
       output-scalars: no
 
   sourcecode:
