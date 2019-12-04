@@ -54,7 +54,13 @@ glow_model = None
 gp_layer = None
 
 
-def build_model(x, y_label, init=False, sampling_mode=False):
+def build_model(x,
+                y_label,
+                init=False,
+                sampling_mode=False,
+                glow_width=8,
+                glow_num_steps=32,
+                glow_num_scales=4):
     """
     Args:
         x: float32 placeholder with shape=(config.batch_size,) + config.obs_shape)
@@ -74,7 +80,7 @@ def build_model(x, y_label, init=False, sampling_mode=False):
     # Ensures that all nn_extra_nvp.*_wn layers have init=init
     with arg_scope([nn_extra_nvp.conv2d_wn, nn_extra_nvp.dense_wn], init=init):
         if glow_model is None:
-            build_glow_model()
+            build_glow_model(glow_width, glow_num_steps, glow_num_scales)
 
         global gp_layer
         if gp_layer is None:
@@ -191,14 +197,14 @@ def build_model(x, y_label, init=False, sampling_mode=False):
         return log_probs, log_probs, log_probs
 
 
-def build_glow_model():
+def build_glow_model(width, num_steps, num_scales):
     # Appends to global nvp_layers.
     global glow_model
     layers, actnorm_layers = nets.create_simple_flow(
-        num_steps=32,  # same as K
-        num_scales=4,  # same as L parameter
+        num_steps=num_steps,  # same as K
+        num_scales=num_scales,  # same as L parameter
         # template_fn=nets.OpenAITemplate(width=512))
-        template_fn=nets.OpenAITemplate(width=8))
+        template_fn=nets.OpenAITemplate(width=width))
     model = fl.ChainLayer(layers)
     # x_bs = tf.placeholder(tf.float32, [16, 64, 64, 3])
     # flow = fl.InputLayer(x_bs)

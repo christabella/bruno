@@ -35,6 +35,22 @@ parser.add_argument('--learning_rate',
                     type=float,
                     default=1e-3,
                     help='Learning rate.')
+parser.add_argument('--lr_decay',
+                    type=float,
+                    default=0.999995,
+                    help='Learning rate decay.')
+parser.add_argument('--glow_width',
+                    type=int,
+                    default=8,
+                    help='Glow model width.')
+parser.add_argument('--glow_num_steps',
+                    type=int,
+                    default=32,
+                    help='Glow model num steps.')
+parser.add_argument('--glow_num_scales',
+                    type=int,
+                    default=4,
+                    help='Glow model num scales.')
 args = parser.parse_args()
 print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))
 assert args.nr_gpu == len(''.join(
@@ -74,7 +90,14 @@ if args.resume:
     print('Resuming training')
 
 # create the model
-model = tf.make_template('model', config.build_model)
+if "glow" not in args.config_name:
+    model = tf.make_template('model', config.build_model)
+else:
+    model = tf.make_template('model',
+                             config.build_model,
+                             glow_width=args.glow_width,
+                             glow_num_steps=args.glow_num_steps,
+                             glow_num_scales=args.glow_num_scales)
 
 # run once for data dependent initialization of parameters
 x_init = tf.placeholder(tf.float32,
@@ -250,7 +273,8 @@ with tf.Session() as sess:
                    ) and iteration in config.learning_rate_schedule:
             lr = np.float32(config.learning_rate_schedule[iteration])
         elif hasattr(config, 'lr_decay'):
-            lr *= config.lr_decay
+            # A little strange because we ignore the actual config.lr_decay.
+            lr *= args.lr_decay
 
         if hasattr(
                 config,
