@@ -31,6 +31,10 @@ parser.add_argument('--debug',
                     type=int,
                     default=0,
                     help='Enable tensorflow debugger (TFDBG)?')
+parser.add_argument('--learning_rate',
+                    type=float,
+                    default=1e-3,
+                    help='Learning rate.')
 args = parser.parse_args()
 print('input args:\n', json.dumps(vars(args), indent=4, separators=(',', ':')))
 assert args.nr_gpu == len(''.join(
@@ -214,7 +218,7 @@ saver = tf.train.Saver()
 
 print('\n Start training')
 train_data_iter = config.train_data_iter
-lr = config.learning_rate
+lr = args.learning_rate
 gp_grad_scale = config.scale_gp_grad
 batch_idxs = range(0, config.max_iter)
 print_every = 100

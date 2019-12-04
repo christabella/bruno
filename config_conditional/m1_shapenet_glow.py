@@ -44,7 +44,6 @@ ndim = np.prod(obs_shape[1:])
 corr_init = np.ones((ndim, ), dtype='float32') * 0.1
 
 optimizer = 'rmsprop'
-learning_rate = 0.001
 lr_decay = 0.999995
 scale_gp_grad = 1.
 gp_grad_schedule = {0: 0., 500: 0.5, 1000: 1.}
