@@ -5,6 +5,7 @@ import os
 import pickle
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
@@ -257,8 +258,10 @@ with tf.Session() as sess:
     # Write the session graph and TF event files to summary directory, which
     # can be anywhere in the current working directory (Guild run directory).
     writer = tf.summary.FileWriter(f'summaries', sess.graph)
-    detailed_writer = tf.summary.FileWriter(f'../detailed_summaries',
-                                            sess.graph)
+    # Get guild run ID
+    guild_run_id = Path.cwd().name
+    detailed_writer = tf.summary.FileWriter(
+        f'../detailed_summaries/{guild_run_id}', sess.graph)
     if args.resume:
         ckpt_file = save_dir + 'params.ckpt'
         print('restoring parameters from', ckpt_file)
